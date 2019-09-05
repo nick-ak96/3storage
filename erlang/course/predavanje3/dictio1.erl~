@@ -1,0 +1,45 @@
+-module(dictio1).
+-export([new/0,lookup/2,add/3,delete/2]).
+
+lookup(Key, nil) ->
+    not_found;
+lookup(Key, {Key,Value,_,_}) ->
+    {found,Value};
+lookup(Key, {Key1,_,Smaller,_}) when Key < Key1 ->
+    lookup(Key, Smaller);
+lookup(Key, {Key1,_,_,Bigger}) when Key > Key1 ->
+    lookup(Key, Bigger).
+
+insert(Key, Value, nil) ->
+    {Key,Value,nil,nil};
+insert(Key, Value, {Key,_,Smaller,Bigger}) ->
+    {Key,Value,Smaller,Bigger};
+insert(Key, Value, {Key1,V,Smaller,Bigger}) when Key < Key1 ->
+    {Key1,V,insert(Key, Value, Smaller),Bigger};
+insert(Key, Value, {Key1,V,Smaller,Bigger}) when Key > Key1 ->
+    {Key1,V,Smaller,insert(Key, Value, Bigger)}.
+
+delete(Key, nil) ->
+    nil;
+delete(Key, {Key,_,nil,nil}) ->
+    nil;
+delete(Key, {Key,_,Smaller,nil}) ->
+    Smaller;
+delete(Key, {Key,_,nil,Bigger}) ->
+    Bigger;
+delete(Key, {Key1,_,Smaller,Bigger}) when Key == Key1 ->
+    {K2,V2,Smaller2} = deletesp(Smaller),
+    {K2,V2,Smaller2,Bigger};
+delete(Key, {Key1,V,Smaller,Bigger}) when Key < Key1 ->
+    {Key1,V,delete(Key, Smaller),Bigger};
+delete(Key, {Key1,V,Smaller,Bigger}) when Key > Key1 ->
+    {Key1,V,Smaller,delete(Key, Bigger)}.
+
+deletesp({Key,Value,nil,nil}) ->
+    {Key,Value,nil};
+deletesp({Key,Value,Smaller,nil}) ->
+    {Key,Value,Smaller};
+deletesp({Key,Value,Smaller,Bigger}) ->
+    {K2,V2,Bigger2} = deletesp(Bigger),
+    {K2,V2,{Key,Value,Smaller,Bigger2}}.
+

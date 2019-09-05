@@ -1,0 +1,639 @@
+
+Two Models for Distribution
+---------------------------
+
+1) Distributed Erlang 
+
+In distributed Erlang, programs are written to run on Erlang nodes. 
+
+    A node is a self-contained Erlang system containing a complete 
+    virtual machine with its own address space and own set of processes.
+
+    We can spawn a process on any node
+
+        Message passing and error handling primitives work as in 
+        the single node case
+
+    Distributed Erlang applications run in a trusted environment
+
+        Typically distributed Erlang applications will be run on clusters on 
+        the same LAN and behind a firewall
+    
+        They can run in an open network
+ 
+2) Socket-based distribution
+
+Using TCP/IP sockets, we can write distributed applications that can run 
+in an untrusted environment. 
+
+    The programming model is less powerful than in distributed Erlang 
+    but more secure. 
+
+    We’ll see how to make applications using a simple socket-based 
+    distribution mechanism.
+
+
+Basic unit that we construct programs from is the process
+
+     Writing a distributed Erlang program is easy; everything works in distributed
+     environment as before on one machine
+
+     Writing distributed programs is usually a lot more difficult.
+
+     We’ll look at a number of techniques for writing simple distributed programs
+
+
+Writing a Distributed Program
+-----------------------------
+
+Armstrong suggests to work on the program in a specific order, which is as follows
+
+1. Write and test a program in a regular nondistributed Erlang session.
+   This is what we’ve been doing up to now, so it presents no new challenges.
+
+2. Test my program on two different Erlang nodes running on the same computer.
+
+3. Test a program on two different Erlang nodes running on two physically
+   separated computers either in the same local area network or anywhere
+   on the Internet.
+
+The final step can be problematic. 
+
+    If we run on machines within the same administrative domain, this is rarely a problem. 
+
+    If the machines are in different domains, we can run into  problems with connectivity
+
+        We have to ensure that our system firewalls and security settings are correctly configured.
+
+To illustrate these steps, we’ll make a simple name server
+
+    Stage 1: Write and test the name server in a regular undistributed Erlang system.
+    Stage 2: Test the name server on two nodes on the same machine.
+    Stage 3: Test the name server on two different nodes on two different
+             machines on the same local area network.
+    Stage 4: Test the name server on two different machines belonging to two
+             different domains in two different countries.
+
+Building the Name Server
+------------------------
+
+A name server is a program that, given a name, returns a value associated
+with that name. 
+
+    We can also change the value associated with a particular name.
+
+Our first name server is extremely simple. 
+
+    It is not fault tolerant, so all the data it stores will be lost if it crashes
+
+
+Stage 1: A Simple Name Server
+-----------------------------
+
+Our name server kvs is a simple Key → Value, server. It has the following inter-
+face:
+
+-spec kvs:start() -> true
+
+    Start the server; this creates a server with the registered name kvs.
+
+-spec kvs:store(Key, Value) -> true
+
+    Associate Key with Value.
+
+-spec kvs:lookup(Key) -> {ok, Value} | undefined
+
+    Look up the value of Key, and return {ok, Value} if there is a value associated
+    with Key; otherwise, return undefined.
+
+See kvs.erl ! Local test:
+
+1> kvs:start().
+true
+2> kvs:store({location, joe}, "Stockholm").
+true
+3> kvs:store(weather, raining).
+true
+4> kvs:lookup(weather).
+{ok,raining}
+5> kvs:lookup({location, joe}).
+{ok,"Stockholm"}
+6> kvs:lookup({location, jane}).
+undefined
+
+
+Stage 2: Client on One Node, Server on Second Node but Same Host
+----------------------------------------------------------------
+
+Now we’ll start two Erlang nodes on the same computer.
+
+    We need to open two terminal windows and start two Erlang systems
+
+Start a distributed Erlang node called gandalf; 
+
+    then, we start the server:
+
+$ erl -sname gandalf
+(gandalf@localhost) 1>
+true
+
+We now start a second terminal session and start an Erlang node called bilbo
+
+We can call the functions in kvs using the library module rpc. 
+
+    rpc is a standard Erlang library module
+
+$ erl -sname bilbo
+(bilbo@localhost) 1> rpc:call(gandalf@localhost,kvs,store, [weather, fine]).
+true
+(bilbo@localhost) 2> rpc:call(gandalf@localhost,kvs,lookup,[weather]).
+{ok,fine}
+
+Distributed computation !
+
+    The server ran on the first node that we started, and the client ran on the second node
+
+We can swap back to gandalf and check the value of the weather
+
+
+Stage 3: Client and Server on Different Machines on the Same LAN
+----------------------------------------------------------------
+
+We’re going to use two nodes.
+
+    The first node is called gandalf on doris.myerl.example.com, and 
+    the second is called bilbo on george.myerl.example.com.
+
+Step 1 is to start an Erlang node on doris.
+
+doris $ erl -name gandalf -setcookie abc
+(gandalf@doris.myerl.example.com) 1> kvs:start().
+true
+
+Step 2 is to start an Erlang node on george and send some commands to gandalf.
+
+george $ erl -name bilbo -setcookie abc
+(bilbo@george.myerl.example.com) 1> rpc:call(gandalf@doris.myerl.example.com,kvs,store,[weather,cold]).
+true
+(bilbo@george.myerl.example.com) 2> rpc:call(gandalf@doris.myerl.example.com,kvs,lookup,[weather]).
+{ok,cold}
+
+Things behave exactly as in the case with two different nodes on the same machine.
+
+Now for this to work, we have to take four steps.
+
+1. Start Erlang with the -name parameter. 
+
+    When we have two nodes on the same machine, we use “short” names but
+    if they are on different networks, we use -name.
+
+    We can also use -sname on two different machines when they are on the
+    same subnet. 
+
+2. Ensure that both nodes have the same cookie. 
+
+    This is why both nodes were started with the command-line argument -setcookie abc. 
+
+3. Make sure the fully qualified hostnames of the nodes concerned are resolvable by DNS. 
+
+    In my case, the domain name myerl.example.com is purely local to my home network and 
+    is resolved locally by adding an entry to /etc/hosts.
+
+4. Make sure that both systems have the same version of the code and the same version of Erlang. 
+
+    If you don’t do this, you might get serious and mysterious errors. 
+
+    The easiest way to avoid problems is to have the same versions of Erlang running everywhere. 
+
+
+Stage 4: Client and Server on Different Hosts in the Internet
+-------------------------------------------------------------
+
+In principle, this is the same as in stage 3
+
+    We have to be much more concerned with security. 
+    When we run two nodes on the same LAN, we probably don’t have to worry too much about security. 
+
+When we connect several machines in an Erlang cluster on the Internet
+
+    We can expect to run into problems with firewalls that do not permit incoming connections. 
+
+To prepare your system for distributed Erlang, you will have to take the following steps:
+
+    1. Make sure that port 4369 is open for both TCP and UDP traffic. This port
+       is used by a program called epmd (short for the Erlang Port Mapper Daemon).
+
+    2. Choose a port or range of ports to be used for distributed Erlang, and
+       make sure these ports are open. 
+
+       If these ports are Min and Max (use Min = Max if you want to use only one port)
+
+     $ erl -name ... -setcookie ... -kernel inet_dist_listen_min Min \
+                                            inet_dist_listen_max Max
+
+
+Libraries and BIFS for Distributed Programming
+----------------------------------------------
+
+When we write distributed programs, we very rarely start from scratch
+
+    There are a number of modules that can be used to write distributed programs
+    These modules are written using the distribution BIFs
+
+Two modules in the standard distribution cover most needs.
+
+    *rpc* provides a number of remote procedure call services
+
+    *global* has functions for the registration of names and locks in a distributed
+    system and for the maintenance of a fully connected network
+
+The single most useful function in the module *rpc* is the following:
+
+    call(Node, Mod, Function, Args) -> Result | {badrpc, Reason}
+
+    This evaluates apply(Mod, Function, Args) on Node and returns the result Result
+    or {badrpc, Reason} if the call fails.
+
+The primitives that are used for writing distributed programs are as follows
+
+    See the manual page for the *erlang* module
+
+-spec spawn(Node, Fun) -> Pid
+
+    This works exactly like spawn(Fun), but the new process is spawned on Node.
+ 
+-spec spawn(Node, Mod, Func, ArgList) -> Pid
+
+    This works exactly like spawn(Mod, Func, ArgList), but the new process is
+    spawned on Node. 
+
+        spawn(Mod, Func, Args) creates a new process that evaluates
+        apply(Mod, Func, Args). 
+
+        It returns the PID of the new process.
+
+    This form of spawn is more robust than spawn(Node, Fun). 
+
+        spawn(Node,Fun) can break when the distributed nodes are not running 
+        exactly the same version of a particular module.
+
+-spec spawn_link(Node, Fun) -> Pid
+
+    This works exactly like spawn_link(Fun), but the new process is spawned on Node.
+
+-spec spawn_link(Node, Mod, Func, ArgList) -> Pid
+
+    This works like spawn(Node, Mod, Func, ArgList), but the new process is linked
+    to the current process.
+
+-spec disconnect_node(Node) -> bool() | ignored
+
+    This forcibly disconnects a node.
+
+-spec monitor_node(Node, Flag) -> true
+
+    If Flag is true, monitoring is turned on; if Flag is false, monitoring is turned off. 
+
+    If monitoring has been turned on, then the process that evaluated this BIF will be sent 
+    
+        {nodeup, Node} and {nodedown, Node} messages 
+        if Node joins or leaves the set of connected Erlang nodes.
+
+-spec node() -> Node
+
+    This returns the name of the local node. nonode@nohost is returned if the
+    node is not distributed.
+
+-spec node(Arg) -> Node
+
+    This returns the node where Arg is located. Arg can be a PID, a reference,
+    or a port. If the local node is not distributed, nonode@nohost is returned.
+
+-spec nodes() -> [Node]
+
+    This returns a list of all other nodes in the network to which we are connected.
+
+-spec is_alive() -> bool()
+
+    This returns true if the local node is alive and can be part of a distributed
+    system. Otherwise, it returns false.
+
+Finally, *send* can be used to send messages to a locally registered process
+in a set of distributed Erlang nodes. The following syntax:
+
+{RegName, Node} ! Msg
+
+sends the message Msg to the registered process RegName on the node Node.
+
+
+An Example of Remote Spawning
+-----------------------------
+
+As a simple example, we can show how to spawn a process on a remote node.
+
+See dist_demo.erl !
+
+Then we start two nodes; 
+
+    Both nodes have to be able to load this code. 
+    No problem to start two nodes on the same host
+
+    We merely start two Erlang nodes from the same directory.
+
+    If the nodes are on two physically separated nodes with different file systems
+
+        Program must be copied to all nodes and compiled before starting
+        both the nodes
+
+On the host doris, we start a node named gandalf.
+
+doris $ erl -name gandalf -setcookie abc
+(gandalf@doris.myerl.example.com) 1>
+
+And on the host george, we start a node named bilbo 
+
+    Use the same cookie!
+
+george $ erl -name bilbo -setcookie abc
+(bilbo@george.myerl.example.com) 1>
+
+Now (on bilbo), we can spawn a process on the remote node (gandalf).
+
+(bilbo@george.myerl.example.com) 1> Pid = dist_demo:start('gandalf@doris.myerl.example.com').
+<5094.40.0>
+
+Pid is now a process identifier of the process on the remote node
+
+    We can call dist_demo:rpc/4 to perform a remote procedure call on the remote node.
+
+(bilbo@george.myerl.example.com) 2> dist_demo:rpc(Pid, erlang, node, []).
+'gandalf@doris.myerl.example.com'
+
+This evaluates erlang:node() on the remote node and returns the value.
+
+
+The File Server Revisited
+-------------------------
+
+We built a simple file server before. 
+
+    See afile_server.erl and afile_client.erl !
+
+The following continues the example of the previous section:
+
+(bilbo@george.myerl.example.com) 1> Pid = dist_demo:start('gandalf@doris.myerl.example.com').
+<6790.42.0>
+(bilbo@george.myerl.example.com) 2> dist_demo:rpc(Pid, file, get_cwd, []).
+{ok,"/home/joe/projects/book/jaerlang2/Book/code"}
+(bilbo@george.myerl.example.com) 3> dist_demo:rpc(Pid, file, list_dir, ["."]).
+{ok,["adapter_db1.erl","processes.erl",
+"counter.beam","attrs.erl","lib_find.erl",...]}
+(bilbo@george.myerl.example.com) 4> dist_demo:rpc(Pid, file, read_file, ["dist_demo.erl"]).
+{ok,<<"-module(dist_demo).\n-export([rpc/4, start/1]).\n\n...>>}
+
+Remote procedure calls to the standard libraries on gandalf
+
+Three functions in the file module to access the file system on gandalf. 
+
+    file:get_cwd() returns the current working directory of the file server, 
+    file:list_dir(Dir) returns a list of the files in Dir, and 
+    file:read_file(File) reads the file File.
+
+We’ve made a file server without writing any code; 
+
+    we’ve just reused the library code in the module file and 
+    made it available through a simple remote procedure call interface
+
+
+The Cookie Protection System
+----------------------------
+
+Access to a single node or set of nodes is secured by a cookie system
+
+    Each node has a single cookie, and 
+    this cookie must be the same as the cookies of any nodes to which the node talks
+
+The cookie protection system was designed for a local area network (LAN) 
+
+    LAN itself was protected from the Internet by a firewall. 
+    Internet applications should first set up secure connections between hosts and 
+    then use the cookie protection system.
+
+The set of connected nodes having the same cookie defines an Erlang cluster.
+
+    We can set the cookie in three ways
+
+Method 1
+
+    Store the same cookie in the file $HOME/.erlang.cookie. 
+
+        This file contains a random string and is automatically created 
+        the first time Erlang is run on your machine.
+
+    This file can be copied to all machines that we want to participate in a
+    distributed Erlang session.
+
+    Alternatively, we can explicitly set the value.
+
+    $ cd
+    $ cat > .erlang.cookie
+    AFRTY12ESS3412735ASDF12378
+    $ chmod 400 .erlang.cookie
+
+    The chmod makes the .erlang.cookie file accessible only by the owner of the file.
+
+Method 2
+
+     When Erlang is started, we can use the command-line argument -setcookie C to 
+     set the magic cookie to C. 
+
+     Here’s an example:
+
+     $ erl -setcookie AFRTY12ESS3412735ASDF12378 ...
+
+Method 3 
+
+     The BIF erlang:set_cookie(node(), C) sets the cookie of the local node
+     to the atom C.
+
+If your environment is insecure
+
+     Method 1 or 3 is better than method 2 since on a Unix system 
+     anybody can discover your cookie using the ps command. 
+
+     Method 2 is useful only for testing.
+
+Cookies are never sent across the network in the clear. 
+
+     Cookies are used only for the initial authentication of a session. 
+     Distributed Erlang sessions are not encrypted but 
+
+     Can be set up to run over encrypted channels. 
+
+
+Socket-Based Distribution
+-------------------------
+
+We will write a simple program using socket-based distribution
+
+Distributed Erlang is fine for the cluster applications
+
+    Less suitable in an open environment where not everyone can be trusted
+
+    Problem: the client can decide to spawn any process on the server machine 
+
+    To destroy your system, all you’d have to do is evaluate the following
+
+        rpc:multicall(nodes(), os, cmd, ["cd /; rm -rf *"])
+
+     Not suited to the situation where different people own the individual machines 
+     and want to control exactly which software can be executed on their machines
+
+We will use a restricted form of *spawn* where the owner of a particular machine 
+has explicit control over what gets run on their machines
+
+
+Controlling Processes with lib_chan
+-----------------------------------
+
+lib_chan is a module that allows a user to explicitly control which processes
+are spawned on their machines
+
+-spec start_server() -> true
+
+    This starts a server on the local host. The behavior of the server is deter-
+    mined by the file $HOME/.erlang_config/lib_chan.conf.
+
+-spec start_server(Conf) -> true
+
+    This starts a server on the local host. The behavior of the server is deter-
+    mined by the file Conf, which contains a list of tuples of the following form:
+
+    {port, NNNN}
+
+        This starts listening to port number NNNN.
+
+    {service, S, password, P, mfa, SomeMod, SomeFunc, SomeArgsS}
+
+        This defines a service S protected by password P. 
+
+        If the service is started, then a process is created by spawning 
+        SomeMod:SomeFunc(MM, ArgsC, SomeArgsS) to handle messages from the client. 
+
+            Here MM is the PID of a proxy process that can be used to send messages 
+            to the client
+
+            The argument ArgsC comes from the client connect call.
+
+-spec connect(Host, Port, S, P, ArgsC) -> {ok, Pid} | {error, Why}
+
+    Try to open the port Port on the host Host, and then try to activate the ser-
+    vice S, which is protected with the password P. 
+
+        If the password is correct, {ok, Pid} will be returned
+
+        Pid will be the process identifier of a proxy process that can be used to 
+        send messages to the server.
+
+When a connection is established by the client calling connect/5, two proxy
+processes are spawned
+
+    One on the client side and the other on the server side
+
+    These proxy processes handle 
+
+        The conversion of Erlang messages to TCP packet data, 
+        trapping exits from the controlling processes, and 
+        socket closure
+
+The Server Code
+---------------
+
+First we write a configuration file.
+
+{port, 1234}.
+{service, nameServer, password, "ABXy45",
+          mfa, mod_name_server, start_me_up, notUsed}.
+
+This means we are going to offer a service called nameServer on port 1234 of
+our machine. The service is protected by the password ABXy45.
+
+When a connection is created by the client calling the following:
+
+connect(Host, 1234, nameServer, "ABXy45", nil)
+
+the server will spawn mod_name_server:start_me_up(MM, nil, notUsed). 
+
+    MM is the PID of a proxy process that is used to talk to the client.
+
+Check how the parameters are gathered !
+
+mod_name_server is as follows:
+
+-module(mod_name_server).
+-export([start_me_up/3]).
+
+start_me_up(MM, _ArgsC, _ArgS) ->
+    loop(MM).
+
+loop(MM) ->
+    receive
+        {chan, MM, {store, K, V}} ->
+            kvs:store(K, V),
+            loop(MM);
+        {chan, MM, {lookup, K}} ->
+            MM ! {send, kvs:lookup(K)},
+            loop(MM);
+        {chan_closed, MM} ->
+            true
+    end.
+
+mod_name_server follows this protocol:
+
+    If the client sends the server a message {send, X}, it will appear in
+    mod_name_server as a message of the form {chan, MM, X} (MM is the PID of the
+    server proxy process).
+
+    If the client terminates or the socket used in communication closes for
+    any reason, then a message of the form {chan_closed, MM} will be received
+    by the server.
+
+    If the server wants to send a message X to the client, it does so by calling
+    MM ! {send, X}.
+
+    If the server wants to explicitly close the connection, it can do so by
+    evaluating MM ! close.
+
+This protocol is the middle-man protocol that is obeyed by both the client
+code and the server code. 
+
+1> kvs:start().
+true
+2> lib_chan:start_server().
+Starting a port server on 1234...
+true
+
+Now we can start a second Erlang session and test this from any client.
+
+1> {ok, Pid} = lib_chan:connect("localhost",1234,nameServer,"ABXy45","").
+{ok, <0.43.0>}
+2> lib_chan:cast(Pid, {store, joe, "writing a book"}).
+{send,{store,joe,"writing a book"}}
+3> lib_chan:rpc(Pid, {lookup, joe}).
+{ok,"writing a book"}
+4> lib_chan:rpc(Pid, {lookup, jim}).
+undefined
+
+Perform similar tests on two physically separated machines.
+
+Owner of the remote machine who decides 
+
+    the contents of the configuration file
+    which applications are permitted on this machine and 
+    which port is to be used to communicate with these applications
+
+
+
+
+
+

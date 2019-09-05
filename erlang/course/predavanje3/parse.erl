@@ -1,0 +1,30 @@
+-module(parse).
+-export([parse_ints/1]).
+
+parse_int(List) ->
+    parse_int(skip_to_int(List), 0).
+
+parse_int([H|T], N) when H >= $0, H =< $9 ->
+    parse_int(T, 10 * N + H - $0);
+parse_int([], 0) ->
+    eoString;
+parse_int(L, N) ->
+    {N,L}.
+
+skip_to_int([]) ->
+    [];
+skip_to_int([H|T]) when H >= $0, H =< $9 ->
+    [H|T];
+skip_to_int([_|T]) ->
+    skip_to_int(T).
+
+parse_ints([]) ->
+    [];
+parse_ints(L) ->
+    case parse_int(L) of
+        eoString ->
+            [];
+        {H,Rest} ->
+            [H|parse_ints(Rest)]
+    end.
+

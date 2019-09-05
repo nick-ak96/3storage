@@ -1,0 +1,509 @@
+Programming files
+-----------------
+
+We’ll look at some of the most commonly used functions for
+manipulating files
+
+We’ll concentrate on the following areas:
+
+    Overview of the main modules used for manipulating files
+    Different ways of reading a file
+    Different ways of writing to a file
+    Directory operations
+    Finding information about a file
+
+
+Modules for Manipulating Files
+------------------------------
+
+file
+
+    This has routines for opening, closing, reading, and writing files; listing
+    directories; and so on. 
+
+filename 
+
+    This module has routines that manipulate filenames in a platform-independent 
+    manner, so you can run the same code on a number of different operating systems.
+
+filelib 
+
+    This module is an extension to file, which contains a number of utilities
+    for listing files, checking file types, and so on. 
+
+    Most of these are written using the functions in file .
+
+io
+
+    This module has routines that work on opened files. 
+
+    It contains routines for parsing data in a file and writing formatted data 
+    to a file.
+
+
+Summary of file operations (in module file )
+--------------------------------------------
+
+Function        Description
+
+change_group    Change group of a file.
+change_owner    Change owner of a file.
+change_time     Change the modification or last access time of a file.
+close           Close a file.
+consult         Read Erlang terms from a file.
+copy            Copy file contents.
+del_dir         Delete a directory.
+delete          Delete a file.
+eval            Evaluate Erlang expressions in a file.
+format_error    Return a descriptive string for an error reason.
+get_cwd         Get the current working directory.
+list_dir        List files in a directory.
+make_dir        Make a directory.
+make_link       Make a hard link to a file.
+make_symlink    Make a symbolic link to a file or directory.
+open            Open a file.
+position        Set the position in a file.
+pread           Read from a file at a certain position.
+pwrite          Write to a file at a certain position.
+read            Read from a file.
+read_file       Read an entire file.
+read_file_info  Get information about a file.
+read_link       See what a link is pointing to.
+read_link_info  Get information about a link or file.
+rename          Rename a file.
+script          Evaluate and return the value of Erlang expressions in a file.
+set_cwd         Set the current working directory.
+sync            Synchronize the in-memory state of a file with that on the
+                physical medium.
+truncate        Truncate a file.
+write           Write to a file.
+write_file      Write an entire file.
+write_file_info Change information about a file.
+
+
+Ways to Read a File
+-------------------
+
+Let’s look at some options when it comes to reading files. 
+
+We’ll start by writing five little programs that open a file and input 
+the data in a number of ways.
+
+    The contents of a file are just a sequence of bytes. 
+
+    Whether they mean anything depends upon the interpretation of these bytes.
+
+    To demonstrate this, we’ll use the same input file for all our examples. 
+    It actually contains a sequence of Erlang terms. 
+
+    Depending upon how we open and read the file, we can interpret 
+    the contents
+
+        as a sequence of Erlang terms,
+        as a sequence of text lines, or 
+        as raw chunks of binary data with no particular interpretation.
+
+Here’s the raw data in the file: 
+
+data1.dat
+---------
+{person, "joe", "armstrong",
+         [{occupation, programmer},{favoriteLanguage, erlang}]}.
+
+{cat, {name, "zorro"},{owner, "joe"}}.
+
+Now we’ll read parts of this file in a number of ways.
+
+Reading All the Terms in the File
+
+1> {ok,A} = file:consult("data1.dat"), A.    
+[{person,"joe","armstrong",
+         [{occupation,programmer},{favoriteLanguage,erlang}]},
+ {cat,{name,"zorro"},{owner,"joe"}}]
+
+file:consult(File) assumes that File contains a sequence of Erlang terms. 
+
+    It returns {ok, [Term]} if it can read all the terms in the file; 
+    otherwise, it returns {error,Reason} .
+
+Reading the Terms in the File One at a Time
+
+    We first open the file with file:open , 
+    then we read the individual terms with io:read 
+    until we reach the end of file, and 
+    finally we close the file with file:close.
+
+1> {ok, S} = file:open("data1.dat", read).
+{ok,<0.36.0>}
+2> io:read(S, '').
+{ok,{person,"joe","armstrong",
+    [{occupation,programmer},{favoriteLanguage,erlang}]}}
+3> io:read(S, '').
+{ok,{cat,{name,"zorro"},{owner,"joe"}}}
+4> io:read(S, '').
+eof
+5> file:close(S).
+ok
+
+The functions we’ve used here are as follows:
+
+-spec file:open(File, read) -> {ok, IoDevice} | {error, Why}
+
+    Tries to open File for reading. It returns {ok, IoDevice} if it can open the file;
+    otherwise, it returns {error, Reason}. IoDevice is an I/O device that is used to
+    access the file.
+
+-spec io:read(IoDevice, Prompt) -> {ok, Term} | {error,Why} | eof
+
+    Reads an Erlang term Term from IoDevice . Prompt is ignored if IoDevice repre-
+    sents an opened file. Prompt is used only to provide a prompt if we use
+    io:read to read from standard input.
+
+-spec file:close(IoDevice) -> ok | {error, Why}
+
+    Closes IoDevice .
+    
+Using these routines we could have implemented file:consult , which we used in
+the previous section. 
+
+Here’s how file:consult might have been defined:
+
+consult(File) ->
+    case file:open(File, read) of
+	{ok, S} ->
+	    Val = consult1(S),
+	    file:close(S),
+	    {ok, Val};
+	{error, Why} ->
+	    {error, Why}
+    end.
+
+consult1(S) ->
+    case io:read(S, '') of
+	{ok, Term} -> [Term|consult1(S)];
+	eof        -> [];
+	Error      -> Error
+    end.
+
+This is not how file:consult is actually defined. 
+
+    The standard libraries use an improved version with better error reporting.
+
+We need to find the source of the file.erl code. 
+
+    code:which , which can locate the object code for any module that has been loaded.
+
+1> code:which(file).
+"/usr/local/lib/erlang/lib/kernel-2.16.1/ebin/file.beam"
+
+In the standard release, each library has two subdirectories. 
+
+   One, called src, contains the source code. 
+   The other, called ebin , contains compiled Erlang code. 
+
+So, the source code for file.erl should be in the following directory:
+
+/usr/local/lib/erlang/lib/kernel-2.16.1/src/file.erl
+
+When all else fails and the manual pages don’t provide the answers to all your
+questions about the code, then a quick peek at the source code can often
+reveal the answer. 
+
+Reading the Lines in a File One at a Time
+
+If we change io:read to io:get_line, we can read the lines in the file one at a time.
+
+    io:get_line reads characters until it encounters a lf or eof:
+
+1> {ok, S} = file:open("data1.dat", read).
+{ok,<0.43.0>}
+2> io:get_line(S, '').
+"{person, \"joe\", \"armstrong\",\n"
+3> io:get_line(S, '').
+"\t[{occupation, programmer},\n"
+4> io:get_line(S, '').
+"\t {favoriteLanguage, erlang}]}.\n"
+5> io:get_line(S, '').
+"\n"
+6> io:get_line(S, '').
+"{cat, {name, \"zorro\"},\n"
+7> io:get_line(S, '').
+"    {owner, \"joe\"}}.\n"
+8> io:get_line(S, '').
+eof
+9> file:close(S).
+ok
+
+
+Reading the Entire File into a Binary
+
+You can use file:read_file(File) to read an entire file into a binary using a single
+atomic operation.
+
+1> file:read_file("data1.dat").
+{ok,<<"{person, \"joe\", \"armstrong\""...>>}
+
+file:read_file(File) returns {ok, Bin} if it succeeds and returns {error, Why} otherwise.
+
+This is by far the most efficient way of reading files
+
+    Read the entire file into memory in one operation, 
+    manipulate the contents, 
+    and store the file in a single operation (using file:write_file ). 
+
+We’ll give an example of this later.
+
+
+Reading a File with Random Access
+
+If the file we want to read is very large 
+
+    Contains binary data in some externally defined format
+    We can open the file in raw mode and read any portion of it using file:pread 
+
+1> {ok, S} = file:open("data1.dat", [read,binary,raw]).
+{ok,{file_descriptor,prim_file,{#Port<0.106>,5}}}
+2> file:pread(S, 22, 46).
+{ok,<<"rong\",\n\t[{occupation, programmer},\n\t {favorite">>}
+3> file:pread(S, 1, 10).
+{ok,<<"person, \"j">>}
+4> file:pread(S, 2, 10).
+{ok,<<"erson, \"jo">>}
+5> file:close(S).
+ok
+
+-spec file:pread(IoDevice, Start, Len) 
+
+   Reads exactly Len bytes from IoDevice starting at byte Start 
+   The bytes in the file are numbered so that the first byte in the file is at position 0
+   It returns {ok, Bin} or {error, Why} 
+
+
+Ways to Write a File
+--------------------
+
+Writing to a file involves pretty much the same operations as reading a file.
+
+
+Writing a List of Terms to a File
+
+From lib_misc.erl
+
+unconsult(File, L) ->
+    {ok, S} = file:open(File, write),
+    lists:foreach(fun(X) -> io:format(S, "~p.~n",[X]) end, L),
+    file:close(S).
+
+We can run this in the shell to create a file called test1.dat .
+
+1> lib_misc:unconsult("test1.dat",
+                      [{cats,["zorrow","daisy"]},
+                       {weather,snowing}]).
+ok
+
+Let’s check that it’s OK.
+
+2> file:consult("test1.dat").
+{ok,[{cats,["zorrow","daisy"]},{weather,snowing}]}
+
+unconsult opens the file in write mode and calls io:format(S, "~p.~n", [X]) to write
+terms to the file.
+
+io:format is the workhorse for creating formatted output. To produce formatted
+output, we call the following:
+
+-spec io:format(IoDevice, Format, Args) -> ok
+
+    ioDevice is an I/O device (which must have been opened in write mode),
+    Format is a string containing formatting codes, and Args is a list of items to
+    be output.
+
+For each item in Args , there must be a formatting command in the format string. 
+
+Formatting commands begin with a tilde ( ~ ) character. 
+
+Here are some of the most commonly used formatting commands:
+
+~n Write a line feed. ~n is smart and writes a line feed in a platform-dependent way. 
+
+~p Pretty-print the argument.
+
+~s The argument is a string or I/O list, or an atom and will be printed without
+any surrounding quotation marks.
+
+~w Write data with the standard syntax. This is used to output Erlang terms.
+
+Example:
+
+Format                               Result
+======                               ======
+io:format("|~10s|",["abc"])          |       abc|
+io:format("|~-10s|",["abc"])         |abc       |
+io:format("|~10.3.+s|",["abc"])      |+++++++abc|
+io:format("|~-10.10.+s|",["abc"])    |abc+++++++|
+io:format("|~10.7.+s|",["abc"])      |+++abc++++|
+
+
+Writing Lines to a File
+
+The following is similar to the previous example—we just use a different formatting command:
+
+1> {ok, S} = file:open("test2.dat", write).
+{ok,<0.62.0>}
+2> io:format(S, "~s~n", ["Hello readers"]).
+ok
+3> io:format(S, "~w~n", [123]).
+ok
+4> io:format(S, "~s~n", ["that's it"]).
+ok
+5> file:close(S).
+ok
+
+This created a file called test2.dat with the following contents:
+
+Hello readers
+123
+that's it
+
+
+Writing an Entire File in One Operation
+
+The most efficient way of writing to a file. 
+
+file:write_file(File, IO) 
+
+    wries the data in IO , which is an I/O list, to File  
+
+    An I/O list is a list whose elements are 
+
+        I/O lists, 
+        binaries, or 
+        integers from 0 to 255. 
+
+When an I/O list is output, it is automatically “flattened” 
+
+    All the list brackets are removed 
+    This method is extremely efficient 
+    
+The program in the next section illustrates this
+
+Listing URLs from a File
+
+Let’s write a simple function called urls2htmlFile(L, File) 
+
+    takes a list of URLs, L , and creates an HTML file, 
+    where the URLs are presented as clickable links
+
+Example of creating an entire file in a single I/O operation
+
+We’ll write our program in the module scavenge_urls 
+
+    File scavenge_urls.erl
+
+Let's have a look at the header
+
+-module(scavenge_urls).
+-export([urls2htmlFile/2, bin2urls/1]).
+-import(lists, [reverse/1, reverse/2, map/2]).
+
+The program has two entry points. 
+
+urls2htmlFile(Urls, File) 
+
+    takes a list of URLs and creates an HTML file containing clickable links for each URL, and 
+
+bin2urls(Bin)
+
+    searches through a binary and returns a list of all the URLs contained in the binary. 
+
+urls2htmlFile is as follows:
+
+urls2htmlFile(Urls, File) ->
+    file:write_file(File, urls2html(Urls)).
+
+bin2urls(Bin) ->
+    gather_urls(binary_to_list(Bin), []).
+
+urls2html(Urls) -> [h1("Urls"),make_list(Urls)].
+
+h1(Title) -> ["<h1>", Title, "</h1>\n"].
+
+make_list(L) ->
+    ["<ul>\n",
+     map(fun(I) -> ["<li>",I,"</li>\n"] end, L),
+     "</ul>\n"].
+
+This code returns an I/O list of characters. 
+
+    Note we make no attempt to flatten the list (which would be rather inefficient); 
+    we make a deep list of characters and just throw it at the output routines. 
+
+    When we write an I/O list to a file with file:write_file, 
+    the I/O system automatically flattens the list 
+
+    Finally, here’s the code to extract the URLs from a binary
+
+gather_urls("<a href" ++ T, L) ->
+    {Url, T1} = collect_url_body(T, reverse("<a href")),
+    gather_urls(T1, [Url|L]);
+gather_urls([_|T], L) ->
+    gather_urls(T, L);
+gather_urls([], L) ->
+    L.
+
+collect_url_body("</a>" ++ T, L) -> {reverse(L, "</a>"), T};
+collect_url_body([H|T], L)       -> collect_url_body(T, [H|L]);
+collect_url_body([], _)          -> {[],[]}.
+
+To run this, we need to get some data to parse. 
+
+    The input data (a binary) is the content of an HTML page, 
+    so we need an HTML page to scavenge. 
+    
+    For this we’ll use socket_examples:nano_get_url 
+
+We’ll do this step by step in the shell.
+
+1> B = socket_examples:nano_get_url("www.erlang.org"),
+   L = scavenge_urls:bin2urls(B),
+   scavenge_urls:urls2htmlFile(L, "gathered.html").
+ok
+
+This produces the file gathered.html .
+
+<h1>Urls</h1>
+<ul>
+<li><a href="old_news.html">Older news.....</a></li>
+<li><a href="http://www.erlang-consulting.com/training_fs.html">here</a></li>
+<li><a href="project/megaco/">Megaco home</a></li>
+<li><a href="EPLICENSE">Erlang Public License (EPL)</a></li>
+<li><a href="user.html#smtp_client-1.0">smtp_client-1.0</a></li>
+<li><a href="download-stats/">download statistics graphs</a></li>
+<li><a href="project/test_server">Erlang/OTP Test
+Server</a></li>
+<li><a href="http://www.erlang.se/euc/06/">proceedings</a></li>
+<li><a href="/doc/doc-5.5.2/doc/highlights.html">
+Read more in the release highlights.
+</a></li>
+<li><a href="index.html"><img src="images/erlang.gif"
+border="0" alt="Home"></a></li>
+</ul>
+
+Writing to a Random-Access File
+
+Writing to a file in random-access mode is similar to reading. 
+
+    First, we have to open the file in write mode. 
+    Next, we use file:pwrite(IoDev, Position, Bin) to write to the file.
+
+Here’s an example:
+
+1> {ok, S} = file:open("some_filename_here", [raw,write,binary]).
+{ok, ...}
+2> file:pwrite(S, 10, <<"new">>).
+ok
+3> file:close(S).
+ok
+
+This writes the characters new starting at an offset of 10 in the file, overwriting
+the original content.

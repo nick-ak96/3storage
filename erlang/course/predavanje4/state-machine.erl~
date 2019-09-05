@@ -1,0 +1,60 @@
+-module(state_machine).
+-compile(export_all).
+
+start() ->
+    spawn(state_machine, s1, []).
+
+s1() ->
+    put(state,1),
+    receive
+        msg_a -> 
+            s2();
+        msg_c -> 
+            s3();
+        {From,state} -> 
+            From ! {self(),get(state)},
+            s1();
+        stop -> 
+            ok
+    end.
+
+s2() ->
+    put(state,2),
+    receive
+        msg_x -> 
+            s3();
+        msg_h -> 
+            s4();
+        {From,state} -> 
+            From ! {self(),get(state)},
+            s2();
+        stop -> 
+            ok
+    end.
+
+s3() ->
+    put(state,3),
+    receive
+        msg_b -> 
+            s1();
+        msg_y -> 
+            s2();
+        {From,state} -> 
+            From ! {self(),get(state)},
+            s3();
+        stop -> 
+            ok
+    end.
+
+s4() ->
+    put(state,4),
+    receive
+        msg_i -> 
+            s3();
+        {From,state} -> 
+            From ! {self(),get(state)},
+            s4();
+        stop -> 
+            ok
+    end.
+

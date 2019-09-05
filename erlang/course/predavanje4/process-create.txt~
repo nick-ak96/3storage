@@ -1,0 +1,152 @@
+Process creation
+----------------
+
+There is no inherent hierarchy among processes.
+
+The designer of an application may explicitly create such a hierarchy.
+
+Process creation
+
+Pid = spawn(Module, FunctionName, ArgumentList)
+
+Pids are used for all forms of communication with a process. 
+
+The call to spawn/3 
+
+    returns immediately when the new process has been created and 
+    does not wait for the given function to evaluate.
+
+Process Pid1 spawns Pid2.
+
+Pid2 = spawn(Mod, Func, Args)
+
+Pid1 and Pid2 are executing concurrently.
+
+The process identifier of the Pid2, is now known only to process Pid1.
+
+     Erlang security system is based on restricting the spread of 
+     the Pid of a process
+
+A process terminates when the evaluation of the function is completed.
+
+Pid is a data object a any other object like the integer.
+
+Inter-process Communication
+---------------------------
+
+Communication between processes is by message passing, only.
+
+Pid ! Message
+
+A message can be any valid Erlang term. 
+
+send (!) is a primitive which evaluates its arguments.
+
+foo(12) ! bar(baz)
+
+The order of evaluation is undefined.
+
+send returns the message sent as its value.
+
+Asynchronous nature of message passing 
+
+     sending a message is an asynchronous operation (no waiting)
+     application level synchronisation
+     message sent to the terminated process does not notify the sender
+
+Messages are always delivered to the recipient. 
+
+     Messages are delivered in the same order they were sent.
+
+The primitive receive is used to receive messages. 
+
+receive
+    Message1 [when Guard1] ->
+        Actions1 ;
+    Message2 [when Guard2] ->
+        Actions2 ;
+    ...
+end
+
+Process has a mailbox storing messages in the order of arrival.
+
+Message1 and Message2 are patterns: 
+
+    matched against messages that are in the process’s mailbox, 
+    removed from the mailbox and 
+    then the corresponding ActionsN are evaluated.
+
+Messages in the mailbox that are not selected by receive 
+
+    remain in the mailbox in the same order as they were stored and 
+    matched against in the next receive. 
+
+receive returns the value of the last expression evaluated in the actions.
+
+process evaluating receive will be suspended until a message is matched.
+
+    selective receive mechanism 
+    no message arriving unexpectedly at a process can block other messages
+    make sure that the system does not fill up with such messages.
+
+Order of receiving messages
+---------------------------
+
+receive tries to match each message in the mailbox with each pattern.
+
+Let a process mailbox contain messages msg_1, msg_2,msg_3 and msg_4 in that order. 
+ 
+Evaluating
+
+receive
+    msg_3 ->
+        ...
+end
+
+gives the mailbox with messages msg_1, msg_2 and msg_4. 
+
+Evaluating 
+
+receive
+    msg_4 ->
+        ...
+    msg_2 ->
+        ...
+end
+
+gives the mailbox msg_1 and msg_4. 
+
+Evaluating
+
+receive
+    AnyMessage ->
+        ...
+end
+
+gives the mailbox msg_4.
+
+Ordering of message patterns in a receive does not directly
+implement priority of messages.
+
+Receiving messages from a specific process
+------------------------------------------
+
+We want to receive messages from a specific process. 
+
+Sender must explicitly include its own process identifier in the message:
+
+Pid ! {self(),abc}
+
+The BIF self() returns the identifier of the calling process.
+
+This could be received by:
+
+receive
+    {Pid,Msg} ->
+        ...
+end
+
+receive as above would receive messages only from process Pid.
+
+
+

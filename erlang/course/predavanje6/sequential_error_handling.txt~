@@ -1,0 +1,382 @@
+Handling Errors in Sequential Code
+----------------------------------
+
+Every time we call a function in Erlang, one of two things will happen: 
+
+    either the function returns a value or 
+    something goes wrong
+
+cost(oranges)   -> 5;
+cost(newspaper) -> 8; 
+cost(apples)    -> 2;
+cost(pears)     -> 9;
+cost(milk)      -> 7.
+
+1> shop:cost(apples).
+2
+2> shop:cost(socks).
+** exception error: no function clause matching
+shop:cost(socks) (shop.erl, line 5)
+
+In this case, instead of returning a value, the system raises an exception
+
+    This is the technical term for “crashing.”
+    We don’t try to repair the error because this is not possible
+    It is up to the caller of cost(socks) to decide what to do if 
+        the function crashes.
+
+Exceptions are raised 
+
+    By the system when internal errors are encountered 
+    Explicitly in code by calling 
+
+        throw(Exception) 
+        exit(Exception)
+        error(Exception)
+
+Typical internal errors that raise exceptions are 
+
+    Pattern matching errors (no clauses in a function match) or 
+    Calling BIFs with incorrectly typed arguments or 
+    Calling a BIF with an incorrect value of an argument 
+
+Erlang phylosophy:
+
+    You should describe the behavior of functions only for valid input arguments
+    All other arguments will cause internal errors that are automatically detected
+    You should never return values when a function is called with invalid arguments 
+    You should always raise an exception
+    This rule is called “Let it crash.”
+
+We can explicitly generate an error by calling one of the following BIFs
+
+exit(Why)
+
+    This is used when you really want to terminate the current process. 
+    If this exception is not caught:
+
+        The signal {'EXIT',Pid,Why} will be broadcast to all processes that are 
+            linked to the current process. 
+        Signals are almost like error messages
+
+throw(Why)
+
+    This is used to throw an exception that a caller might want to catch. 
+    The user of this function has two alternatives: 
+
+        You can program for the common case and blissfully ignore exceptions, or 
+        You can enclose the call in a try...catch expression and handle the errors.
+
+error(Why)
+
+    This is used for denoting “crashing errors.” 
+    That is, something rather nasty has happened that callers are not really 
+        expected to handle. 
+
+Erlang has two methods of catching an exception
+
+    1) Enclose the call to the function that raised the exception within 
+       a try...catch expression
+    2) enclose the call in a catch expression
+
+
+Trapping an Exception with try...catch
+--------------------------------------
+
+Java can trap an exception with the following syntax
+
+try {
+    block
+} catch (exception type identifier) {
+    block
+} catch (exception type identifier) {
+    block
+} ...
+finally {
+    block
+}
+   
+Erlang has a remarkably similar construct, which looks like this:
+
+try FuncOrExpressionSeq of
+    Pattern1 [when Guard1] -> Expressions1;
+    Pattern2 [when Guard2] -> Expressions2;
+    ...
+catch
+    ExceptionType1: ExPattern1 [when ExGuard1] -> ExExpressions1;
+    ExceptionType2: ExPattern2 [when ExGuard2] -> ExExpressions2;
+    ...
+after
+    AfterExpressions
+end
+
+try...catch works as follows:
+
+    First FuncOrExpessionSeq is evaluated
+    If this finishes without raising an exception
+
+        Return value of the function is matched against the patterns Pattern1, Pattern2, ...
+        If a match is found, then the value of the entire ry...catch is found by 
+
+            Evaluating the expression sequence following the matching pattern
+
+    If an exception is raised within FuncOrExpressionSeq
+
+        The catch patterns ExPattern1, ... are matched to find expressions to be evaluated
+        ExceptionType is an atom (one of throw, exit, or error) 
+
+            Tells us how the exception was generated. 
+            If ExceptionType is omitted, then the value defaults to throw.
+
+The code following the after keyword is used for cleaning up after FuncOrExpressionSeq
+
+    This code is guaranteed to be executed, even if an exception is raised
+    The return value of AfterExpressions is lost
+
+We can omit several of the parts of a try...catch expression
+
+try F
+catch
+    ...
+end
+
+means the same as this:
+
+try F of
+    Val -> Val
+catch
+    ...
+end
+
+Also, the after section can be omitted
+
+
+Programming Idioms with try...catch
+-----------------------------------
+
+When we design applications, we often make sure that the code that catches
+an error can catch all the errors that a function can produce
+
+Here’s a pair of functions illustrating this
+
+generate_exception(1) -> a;
+generate_exception(2) -> throw(a);
+generate_exception(3) -> exit(a);
+generate_exception(4) -> {'EXIT', a};
+generate_exception(5) -> error(a).
+
+Function generates three different types of an exception and has two 
+ordinary return values
+
+Now we’ll write a wrapper function to call generate_exception in a try...catch
+expression.
+
+demo1() ->
+    [catcher(I) || I <- [1,2,3,4,5]].
+
+catcher(N) ->
+    try generate_exception(N) of
+        Val -> {N, normal, Val}
+    catch
+        throw:X -> {N, caught, thrown, X};
+        exit:X -> {N, caught, exited, X};
+        error:X -> {N, caught, error, X}
+    end.
+
+Running this we obtain the following:
+
+> try_test:demo1().
+[{1,normal,a},
+ {2,caught,thrown,a},
+ {3,caught,exited,a},
+ {4,normal,{'EXIT',a}},
+ {5,caught,error,a}]
+
+This shows that we can trap and distinguish all the forms of exception that
+a function can raise
+
+
+Trapping an Exception with catch
+--------------------------------
+
+The other way to trap an exception is to use the primitive catch
+
+    The catch primitive is not the same as the catch block in the try...catch statement 
+    The catch statement was part of the language long before try...catch
+
+When an exception occurs within a catch statement
+
+    It is converted into an {'EXIT', ...} tuple that describes the error
+
+We can call generate_exception within a catch expression
+
+demo2() ->
+    [{I, (catch generate_exception(I))} || I <- [1,2,3,4,5]].
+
+2> try_test:demo2().
+    [{1,a},
+    {2,a},
+    {3,{'EXIT',a}},
+    {4,{'EXIT',a}},
+    {5,{'EXIT',
+           {a,[{try_test,generate_exception,1,
+               [{file,"try_test.erl"},{line,9}]},
+           {try_test,'-demo2/0-lc$^0/1-0-',1,
+               [{file,"try_test.erl"},{line,28}]},
+           {try_test,'-demo2/0-lc$^0/1-0-',1,
+               [{file,"try_test.erl"},{line,28}]},
+           {erl_eval,do_apply,6,[{file,"erl_eval.erl"},{line,576}]},
+           {shell,exprs,7,[{file,"shell.erl"},{line,668}]},
+           {shell,eval_exprs,7,[{file,"shell.erl"},{line,623}]},
+           {shell,eval_loop,3,[{file,"shell.erl"},{line,608}]}]}}}]
+
+If you compare this with the output from the try...catch section
+
+     The two methods provide differing amounts of debug information
+     The second provided a detailed stack trace
+
+
+Programming Style with Exceptions
+---------------------------------
+
+The following sections contain some frequently occurring code patterns 
+
+    We can reuse in our programs
+
+
+1) Improving Error Messages
+
+One use of the error/1 BIF is to improve the quality of error messages
+
+1> math:sqrt(-1).
+** exception error: bad argument in an arithmetic expression
+in function math:sqrt/1
+   called as math:sqrt(-1)
+
+We can write a wrapper for this, which improves the error message.
+
+File lib_misc.erl includes
+
+sqrt(X) when X < 0 ->
+    error({squareRootNegativeArgument, X});
+sqrt(X) ->
+    math:sqrt(X).
+
+2> lib_misc:sqrt(-1).
+** exception error: {squareRootNegativeArgument,-1}
+   in function lib_misc:sqrt/1
+
+
+2) Code Where Error Returns Are Common
+
+If your function does not really have a “common case,” you should probably 
+return something like 
+
+    {ok, Value} or {error, Reason}
+    Remember that this forces all callers to do something with the return value
+
+You then have to choose between two alternatives; you either write this:
+
+...
+case f(X) of
+    {ok, Val} ->
+        do_some_thing_with(Val);
+
+    {error, Why} ->
+        %% ... do something with the error ...
+end,
+...
+
+Or, you can write this:
+
+...
+{ok, Val} = f(X),
+do_some_thing_with(Val);
+...
+
+which raises an exception if f(X) returns {error, ...}
+
+
+3) Code Where Errors Are Possible but Rare
+
+Typically you should write code that is expected to handle errors, as in this example:
+
+try my_func(X)
+catch
+    throw:{thisError, X} -> ...
+    throw:{someOtherError, X} -> ...
+end
+
+And the code that detects the errors should have matching throws as follows:
+
+my_func(X) ->
+    case ... of
+        ...
+        ... ->
+            ... throw({thisError, ...})
+        ... ->
+            ... throw({someOtherError, ...})
+
+
+4) Catching Every Possible Exception
+
+If we want to catch every possible error, we can use the following idiom
+
+try Expr
+catch
+    _:_ -> ... Code to handle all exceptions
+end
+...
+
+Pattern _:_ catches all exceptions
+
+If we omit the tag and write this:
+
+try Expr
+catch
+    _ -> ... Code to handle all exceptions
+end
+...
+
+then we won’t catch all errors, since in this case the default tag throw is
+assumed
+
+
+Stack Traces
+------------
+
+When an exception is caught, we can find the latest stack trace by calling
+erlang:get_stacktrace(). Here’s an example:
+
+demo3() ->
+    try generate_exception(5)
+    catch
+        error:X ->
+            {X, erlang:get_stacktrace()}
+    end.
+
+1> try_test:demo3().
+{a,[{try_test,generate_exception,1,[{file,"try_test.erl"},{line,9}]},
+    {try_test,demo3,0,[{file,"try_test.erl"},{line,33}]},
+    {erl_eval,do_apply,6,[{file,"erl_eval.erl"},{line,576}]},
+    {shell,exprs,7,[{file,"shell.erl"},{line,668}]},
+    {shell,eval_exprs,7,[{file,"shell.erl"},{line,623}]},
+    {shell,eval_loop,3,[{file,"shell.erl"},{line,608}]}]}
+
+The trace shows what happened when we tried to evaluate try_test:demo3() 
+
+    It shows that our program crashed in the function generate_exception/1 
+        (line 9 of the file try_test.erl)
+    The stack trace contains information about where the function would have 
+        returned to had it succeeded
+    The individual tuples in the stack trace are of the form {Mod,Func,Arity,Info}
+
+        Info contains the filename and line number of the item in the stack trace
+        try_test:generate_exception/1 would have returned to 
+        try_test:demo3(), which would have returned to 
+        erl_eval:do_apply/6, and so on
+
+The stack trace gives us a good indication of where the program was executing at 
+the time when the error occurred
+
+

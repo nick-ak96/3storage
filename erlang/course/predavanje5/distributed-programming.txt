@@ -1,0 +1,211 @@
+Distributed Programming
+-----------------------
+
+Erlang applications which run on a network of Erlang nodes
+
+    Language primitives which support implementation of distributed systems
+    Concurrency primitives and error detection primitives
+
+        Have the same properties in a distributed system as in 
+        a single node system
+
+Reasons for writing distributed applications
+
+    Speed
+
+        Different parts of application run in parallel on different nodes
+
+        Example 1
+        Compiler can compile different functions on different machines
+        Compiler then directs evaluation
+
+        Example 2
+        Real-time system which consists of a pool of nodes
+        Jobs are allocated to different nodes in a round-robin fashion 
+        In order to decrease the response time of the system
+
+    Reliability and fault tolerance
+
+        To increase the reliability: we arrange for several nodes to co-operate
+        Failure of one or more nodes does not effect the operational behavior of 
+        the system as a whole
+
+    Accessing resources which reside on another node
+
+        Certain hardware or software may only be accessible from a specific computer
+
+    Inherent distribution in the application
+
+        Conference systems, booking systems and many types of multi-computer 
+        real-time system are examples of such applications
+
+    Extensibility
+
+        A system can be designed so that additional nodes can be added 
+        in order to increase the capacity of the system
+
+
+Distributed mechanisms
+----------------------
+
+The following BIFs are used for distributed programming
+
+spawn(Node, Mod, Func, Args)
+
+    Spawns a process on a remote node
+
+spawn_link(Node, Mod, Func, Args)
+
+    Spawns a process on a remote node and creates a link to the process
+
+monitor_node(Node, Flag)
+
+    If Flag is true, this BIF makes the evaluating process monitor the node Node
+    If Node should fail or be nonexistent, a {nodedown, Node} message will 
+    be sent to the evaluating process
+    If Flag is false, monitoring is turned off
+
+node()
+
+    Returns our own node name
+
+nodes()
+
+    Returns a list of the other known node names
+
+node(Item)
+  
+    Returns the node name of the origin of Item where Item can be a Pid,
+    reference or a port
+
+disconnect_node(Nodename)
+
+    Disconnects us from the node Nodename
+
+The node is a central concept in distributed Erlang
+
+    An executing Erlang system which can take part in distributed transactions
+
+An individual Erlang system becomes part of a distributed Erlang system 
+
+    Starting a special process called the *net kernel* 
+    This process evaluates the BIF alive/2
+    Once the net kernel is started, the system is said to be alive
+
+        When alive, a node name is assigned to it
+        This name is returned by the BIF node()
+        This name is an atom and it is guaranteed to be globally unique
+        An atom consisting of two parts separated by an ’@’ character
+
+node(Item) 
+
+    where Item is a Pid, port or reference returns the name of the node where Item was created
+
+nodes/0 
+
+    returns a list of all other nodes in the network which we are currently connected to
+
+monitor_node(Node, Flag)
+
+    used to monitor nodes
+    monitor_node(Node, true)
+
+        process evaluating the expression will be notified with a {nodedown, Node} message
+        if Node fails or if the network connection to Node fails
+        it is not possible to differentiate between node failures and network failures
+
+    the following code suspends until the node Node fails
+
+    monitor_node(Node, true),
+        receive
+            {nodedown, Node} ->
+                .....
+    end,
+
+    If no connection exists, and monitor_node/2 is called
+
+        The system will try to setup a connection and deliver a nodedown message 
+            if the connection fails
+
+    monitor_node(Node, false) 
+
+        Decrement a counter, indicating the number of nodedown messages that 
+            should be delivered to the calling process if Node fails.
+        If two consecutive monitor_node/2 calls => two nodedown messages delivered 
+            if the node fails 
+        We often want to encapsulate remote calls within a matching
+            pair of monitor_node(Node, true) and monitor_node(Node, false).
+
+spawn/4
+
+    BIFs spawn/3 and spawn_link/3 create new processes on the local node
+    To create a new process on an arbitrary node we use the BIF spawn/4
+    
+Pid = spawn(Node, Mod, Func, Args)
+
+    spawns a process on Node
+
+spawn_link/4 
+
+    spawns a linked process on a remote node
+
+Pid is returned in both cases, which can be used in the normal manner
+
+    Also if the node does not exist a Pid is returned 
+        in this case the Pid is of no use since no process is running
+    In the case of spawn_link/4 an ’EXIT’ signal will be sent
+        to the originating process if the node does not exist
+    All operations which are normally allowed on Pids are allowed on remote
+        Pids as well
+    Sending messages to a remote process is syntactically and semantically 
+        identical to sending to a local process
+
+        Delivered in the same order they were sent, never corrupted and never lost
+
+    The only error control of message reception which is possible
+
+        by the link mechanism
+        by explicitly synchronizing the sender and receiver of a message
+     
+Registered Processes
+--------------------
+
+register/2 is used to register a process by name on a local node
+
+To send a message to a registered process on a remote node we use the notation
+
+{Name, Node} ! Mess.
+
+If there is a process registered as Name on node Node
+
+    Mess will be sent to that process
+    Mess will be lost if the node or the registered process does not exist, 
+
+Connections
+-----------
+
+A concept of connections between Erlang nodes
+
+when the system is started the system is not ’aware’ of any other nodes
+
+    evaluating nodes() will return []
+    A connection to a remote node N, is setup by the run-time system 
+        the first time when N is referred to.
+
+1> nodes().
+[]
+2> P = spawn(’klacke@super.eua.ericsson.se’, M, F, A).
+<24.16.1>
+3> nodes().
+[’klacke@super.eua.ericsson.se’]
+4> node(P).
+’klacke@super.eua.ericsson.se’
+
+To remove a connection to a node the BIF disconnect_node(Node) can be used
+
+    Nodes may come and go dynamically in a similar manner to processes
+
+A Banking Example
+-----------------
+
+See bank_server.erl and bank_client.erl 

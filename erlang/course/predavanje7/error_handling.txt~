@@ -1,0 +1,620 @@
+Handling Errors in Sequential Code
+----------------------------------
+
+Every time we call a function in Erlang, one of two things will happen: 
+
+    either the function returns a value or 
+    something goes wrong
+
+cost(oranges)   -> 5;
+cost(newspaper) -> 8; 
+cost(apples)    -> 2;
+cost(pears)     -> 9;
+cost(milk)      -> 7.
+
+1> shop:cost(apples).
+2
+2> shop:cost(socks).
+** exception error: no function clause matching
+shop:cost(socks) (shop.erl, line 5)
+
+In this case, instead of returning a value, the system raises an exception
+
+    This is the technical term for “crashing.”
+    We don’t try to repair the error because this is not possible
+    It is up to the caller of cost(socks) to decide what to do if 
+        the function crashes.
+
+Exceptions are raised 
+
+    By the system when internal errors are encountered 
+    Explicitly in code by calling 
+
+        throw(Exception) 
+        exit(Exception)
+        error(Exception)
+
+Typical internal errors that raise exceptions are 
+
+    Pattern matching errors (no clauses in a function match) or 
+    Calling BIFs with incorrectly typed arguments or 
+    Calling a BIF with an incorrect value of an argument 
+
+Erlang phylosophy:
+
+    You should describe the behavior of functions only for valid input arguments
+    All other arguments will cause internal errors that are automatically detected
+    You should never return values when a function is called with invalid arguments 
+    You should always raise an exception
+    This rule is called “Let it crash.”
+
+We can explicitly generate an error by calling one of the following BIFs
+
+exit(Why)
+
+    This is used when you really want to terminate the current process. 
+    If this exception is not caught:
+
+        The signal {'EXIT',Pid,Why} will be broadcast to all processes that are 
+            linked to the current process. 
+        Signals are almost like error messages
+
+throw(Why)
+
+    This is used to throw an exception that a caller might want to catch. 
+    The user of this function has two alternatives: 
+
+        You can program for the common case and blissfully ignore exceptions, or 
+        You can enclose the call in a try...catch expression and handle the errors.
+
+error(Why)
+
+    This is used for denoting “crashing errors.” 
+    That is, something rather nasty has happened that callers are not really 
+        expected to handle. 
+
+Erlang has two methods of catching an exception
+
+    1) Enclose the call to the function that raised the exception within 
+       a try...catch expression
+    2) enclose the call in a catch expression
+
+
+Trapping an Exception with try...catch
+--------------------------------------
+
+Java can trap an exception with the following syntax
+
+try {
+    block
+} catch (exception type identifier) {
+    block
+} catch (exception type identifier) {
+    block
+} ...
+finally {
+    block
+}
+   
+Erlang has a remarkably similar construct, which looks like this:
+
+try FuncOrExpressionSeq of
+    Pattern1 [when Guard1] -> Expressions1;
+    Pattern2 [when Guard2] -> Expressions2;
+    ...
+catch
+    ExceptionType1: ExPattern1 [when ExGuard1] -> ExExpressions1;
+    ExceptionType2: ExPattern2 [when ExGuard2] -> ExExpressions2;
+    ...
+after
+    AfterExpressions
+end
+
+try...catch works as follows:
+
+    First FuncOrExpessionSeq is evaluated
+    If this finishes without raising an exception
+
+        Return value of the function is matched against the patterns Pattern1, Pattern2, ...
+        If a match is found, then the value of the entire ry...catch is found by 
+
+            Evaluating the expression sequence following the matching pattern
+
+    If an exception is raised within FuncOrExpressionSeq
+
+        The catch patterns ExPattern1, ... are matched to find expressions to be evaluated
+        ExceptionType is an atom (one of throw, exit, or error) 
+
+            Tells us how the exception was generated. 
+            If ExceptionType is omitted, then the value defaults to throw.
+
+The code following the after keyword is used for cleaning up after FuncOrExpressionSeq
+
+    This code is guaranteed to be executed, even if an exception is raised
+    The return value of AfterExpressions is lost
+
+We can omit several of the parts of a try...catch expression
+
+try F
+catch
+    ...
+end
+
+means the same as this:
+
+try F of
+    Val -> Val
+catch
+    ...
+end
+
+Also, the after section can be omitted
+
+
+Programming Idioms with try...catch
+-----------------------------------
+
+When we design applications, we often make sure that the code that catches
+an error can catch all the errors that a function can produce
+
+Here’s a pair of functions illustrating this
+
+generate_exception(1) -> a;
+generate_exception(2) -> throw(a);
+generate_exception(3) -> exit(a);
+generate_exception(4) -> {'EXIT', a};
+generate_exception(5) -> error(a).
+
+Function generates three different types of an exception and has two 
+ordinary return values
+
+Now we’ll write a wrapper function to call generate_exception in a try...catch
+expression.
+
+demo1() ->
+    [catcher(I) || I <- [1,2,3,4,5]].
+
+catcher(N) ->
+    try generate_exception(N) of
+        Val -> {N, normal, Val}
+    catch
+        throw:X -> {N, caught, thrown, X};
+        exit:X -> {N, caught, exited, X};
+        error:X -> {N, caught, error, X}
+    end.
+
+Running this we obtain the following:
+
+> try_test:demo1().
+[{1,normal,a},
+ {2,caught,thrown,a},
+ {3,caught,exited,a},
+ {4,normal,{'EXIT',a}},
+ {5,caught,error,a}]
+
+This shows that we can trap and distinguish all the forms of exception that
+a function can raise
+
+
+Trapping an Exception with catch
+--------------------------------
+
+The other way to trap an exception is to use the primitive catch
+
+    The catch primitive is not the same as the catch block in the try...catch statement 
+    The catch statement was part of the language long before try...catch
+
+When an exception occurs within a catch statement
+
+    It is converted into an {'EXIT', ...} tuple that describes the error
+
+We can call generate_exception within a catch expression
+
+demo2() ->
+    [{I, (catch generate_exception(I))} || I <- [1,2,3,4,5]].
+
+2> try_test:demo2().
+    [{1,a},
+    {2,a},
+    {3,{'EXIT',a}},
+    {4,{'EXIT',a}},
+    {5,{'EXIT',
+           {a,[{try_test,generate_exception,1,
+               [{file,"try_test.erl"},{line,9}]},
+           {try_test,'-demo2/0-lc$^0/1-0-',1,
+               [{file,"try_test.erl"},{line,28}]},
+           {try_test,'-demo2/0-lc$^0/1-0-',1,
+               [{file,"try_test.erl"},{line,28}]},
+           {erl_eval,do_apply,6,[{file,"erl_eval.erl"},{line,576}]},
+           {shell,exprs,7,[{file,"shell.erl"},{line,668}]},
+           {shell,eval_exprs,7,[{file,"shell.erl"},{line,623}]},
+           {shell,eval_loop,3,[{file,"shell.erl"},{line,608}]}]}}}]
+
+If you compare this with the output from the try...catch section
+
+     The two methods provide differing amounts of debug information
+     The second provided a detailed stack trace
+
+
+Programming Style with Exceptions
+---------------------------------
+
+The following sections contain some frequently occurring code patterns 
+
+    We can reuse in our programs
+
+
+1) Improving Error Messages
+
+One use of the error/1 BIF is to improve the quality of error messages
+
+1> math:sqrt(-1).
+** exception error: bad argument in an arithmetic expression
+in function math:sqrt/1
+   called as math:sqrt(-1)
+
+We can write a wrapper for this, which improves the error message.
+
+File lib_misc.erl includes
+
+sqrt(X) when X < 0 ->
+    error({squareRootNegativeArgument, X});
+sqrt(X) ->
+    math:sqrt(X).
+
+2> lib_misc:sqrt(-1).
+** exception error: {squareRootNegativeArgument,-1}
+   in function lib_misc:sqrt/1
+
+
+2) Code Where Error Returns Are Common
+
+If your function does not really have a “common case,” you should probably 
+return something like 
+
+    {ok, Value} or {error, Reason}
+    Remember that this forces all callers to do something with the return value
+
+You then have to choose between two alternatives; you either write this:
+
+...
+case f(X) of
+    {ok, Val} ->
+        do_some_thing_with(Val);
+
+    {error, Why} ->
+        %% ... do something with the error ...
+end,
+...
+
+Or, you can write this:
+
+...
+{ok, Val} = f(X),
+do_some_thing_with(Val);
+...
+
+which raises an exception if f(X) returns {error, ...}
+
+
+3) Code Where Errors Are Possible but Rare
+
+Typically you should write code that is expected to handle errors, as in this example:
+
+try my_func(X)
+catch
+    throw:{thisError, X} -> ...
+    throw:{someOtherError, X} -> ...
+end
+
+And the code that detects the errors should have matching throws as follows:
+
+my_func(X) ->
+    case ... of
+        ...
+        ... ->
+            ... throw({thisError, ...})
+        ... ->
+            ... throw({someOtherError, ...})
+
+
+4) Catching Every Possible Exception
+
+If we want to catch every possible error, we can use the following idiom
+
+try Expr
+catch
+    _:_ -> ... Code to handle all exceptions
+end
+...
+
+Pattern _:_ catches all exceptions
+
+If we omit the tag and write this:
+
+try Expr
+catch
+    _ -> ... Code to handle all exceptions
+end
+...
+
+then we won’t catch all errors, since in this case the default tag throw is
+assumed
+
+
+Stack Traces
+------------
+
+When an exception is caught, we can find the latest stack trace by calling
+erlang:get_stacktrace(). Here’s an example:
+
+demo3() ->
+    try generate_exception(5)
+    catch
+        error:X ->
+            {X, erlang:get_stacktrace()}
+    end.
+
+1> try_test:demo3().
+{a,[{try_test,generate_exception,1,[{file,"try_test.erl"},{line,9}]},
+    {try_test,demo3,0,[{file,"try_test.erl"},{line,33}]},
+    {erl_eval,do_apply,6,[{file,"erl_eval.erl"},{line,576}]},
+    {shell,exprs,7,[{file,"shell.erl"},{line,668}]},
+    {shell,eval_exprs,7,[{file,"shell.erl"},{line,623}]},
+    {shell,eval_loop,3,[{file,"shell.erl"},{line,608}]}]}
+
+The trace shows what happened when we tried to evaluate try_test:demo3() 
+
+    It shows that our program crashed in the function generate_exception/1 
+        (line 9 of the file try_test.erl)
+    The stack trace contains information about where the function would have 
+        returned to had it succeeded
+    The individual tuples in the stack trace are of the form {Mod,Func,Arity,Info}
+
+        Info contains the filename and line number of the item in the stack trace
+        try_test:generate_exception/1 would have returned to 
+        try_test:demo3(), which would have returned to 
+        erl_eval:do_apply/6, and so on
+
+The stack trace gives us a good indication of where the program was executing at 
+the time when the error occurred
+
+
+Errors in Concurrent Programs
+-----------------------------
+
+Extending the ideas to concurrent programs
+
+A system with only one sequential process
+
+    If this process dies no other process can help
+    For this reason, sequential languages have concentrated on the prevention of failure 
+
+        Emphasis on defensive programming
+
+In Erlang we have a large number of processes at our disposal
+
+    The failure of any individual process is not so important
+    We usually write only a small amount of defensive code 
+    Instead concentrate on writing corrective code
+    Detect the errors and then correct them after they have occurred
+    
+Error Handling Philosophy
+
+    Based on the idea of remote detection and handling of errors
+    Instead of handling an error in the process where the error occurs
+    We let the process die and correct the error in some other process
+
+When we design a fault-tolerant system, we assume that errors will occur
+
+    Processes will crash, and that machines will fail
+    Our job is to detect the errors after they have occurred and correct them if possible
+    Users should not notice any failures or suffer any loss of service
+    we have code to clean up the system after errors have occurred
+
+Detecting and identifying errors is built into the Erlang VM 
+
+    Integrated at a very low level and is part of the Erlang programming language
+
+        how to detect errors, 
+        how to identify what has gone wrong, and 
+        how to keep the system in a stable state
+
+Philosophy can be summed up in two easy-to-remember phrases
+
+    "Let some other process fix the error"
+    "Let it chrash!"
+
+
+Let Some Other Process Fix the Error
+------------------------------------
+
+Processes are arranged to monitor each other for health
+
+    If a process dies, other process can observe this and perform actions
+    
+We must create a *link* or monitor between the processes
+
+    If the linked or monitored processes dies, the observing process is informed
+    Process running on one machine monitor the behavior of a process running 
+        on a different machine
+
+        This is the basis for programming fault-tolerant systems
+        Entire machine might crash, so we need at least two machines
+        One machine performs computations, and the other machines observe
+
+    This can be thought of as an extension to handling errors in sequential code
+
+  
+Let It Crash
+------------
+
+This will sound very strange to you if you come from a language like C
+
+    We are taught to write defensive code
+    This leads to large quantities of error checking code 
+ 
+        which is *intertwined* with the non-error-checking code
+
+In Erlang we do exactly the opposite. We build our applications in two parts:
+
+    A part that solves the problem and a part that corrects errors if they have occurred
+    The part that solves the problem is written with as little defensive code as possible
+ 
+        We assume that all arguments to functions are correct
+ 
+    The part that corrects errors is often *generic*
+
+        The same error-correcting code can be used for many different applications
+
+Analogical performance of DBMS and OS 
+
+    In database, for instance, aborted transactions let the system restore the database 
+        to the state it was in before the error occurred
+    In an operating system, if a process crashes, we let the operating system close any 
+        open files or sockets and restore the system to a stable state
+
+This leads to a clean separation of issues
+
+    Code that solves the problem and the observing and error correcting code
+    The two are not intertwined
+    This can lead to a dramatic reduction in code volume
+
+
+Error Handling Semantics
+------------------------
+
+Some new terms that you’ll come across later in the chapter
+
+Processes
+
+    There are two types of processes: normal processes and system processes.
+    spawn creates a normal process. A normal process can become a system
+    process by evaluating the BIF process_flag(trap_exit, true).
+
+Links
+
+    Processes can be linked. If the two processes A and B are linked and A
+    terminates for any reason, an error signal will be sent to B and the other
+    way around.
+
+Link sets
+
+    The link set of a process P is the set of processes that are linked to P.
+
+Monitors
+
+    Monitors are similar to links but are one-directional. If A monitors B and
+    if B terminates for any reason, a “down” message will be sent to A but not
+    the other way around.
+
+Messages and error signals
+
+    Processes collaborate by exchanging messages or error signals. 
+    
+        Messages are sent using the send primitive. 
+        Error signals are sent automatically when a process crashes or when 
+            a process terminates. 
+        The error signals are sent to the link set of the process that terminated.
+
+Receipt of an error signal
+
+    When a system process receives an error signal, 
+
+        the signal is converted into a message of the form {'EXIT', Pid, Why}. 
+        
+            Pid is the identity of the process that terminated, and 
+            Why is the reason for termination (sometimes called the exit reason). 
+   
+        If the process terminates without an error, then Why will be the atom normal; 
+
+            otherwise, Why describes the error.
+
+    When a normal process receives an error signal, 
+
+         it will terminate if the exit reason is not normal. 
+         When it terminates, it also broadcasts an exit signal to its link set.
+
+Explicit error signals
+
+    A process that evaluates exit(Why) will terminate (if this code is not executing
+    within the scope of a catch or try primitive) and broadcast an exit signal
+    with the reason Why to its link set.
+
+    A process can send a “fake” error signal by evaluating exit(Pid, Why). In this
+    case, Pid will receive an exit signal with the reason Why. The process that
+    called exit/2 does not die (this is deliberate).
+
+Untrappable exit signals
+
+    When a system process receives a kill signal, it terminates. Kill signals
+    are generated by calling exit(Pid, kill). This signal bypasses the normal error
+    signal processing mechanism and is not converted into a message. The
+    exit kill signal should be reserved for rogue processes that refuse to die
+    using any of the other error handling mechanisms.
+
+
+Creating Links
+--------------
+
+Imagine we have a set of unrelated processes P1-P10
+
+    To create links, we call the primitive link(Pid)
+
+        Creates a link between the calling process and Pid
+        if P1 calls link(P3), a link is created between P1 and P3
+
+    After P1 calls link(P3), P3 calls link(P10), and so on
+
+        Finally we get P1---P3---P10---P9----P4 linked
+        Note that the link set of P1 has one element (P3) 
+        The link set of P3 has two elements (P1 and P10), and so on
+
+
+Groups of Processes That All Die Together
+-----------------------------------------
+
+Often you’ll want to create groups of processes that all die together. 
+
+    When processes collaborate to solve a problem and something goes wrong 
+
+        We can sometimes recover, but if we can’t recover
+        we just want to stop everything we were doing 
+
+    This is rather like the notion of a transaction
+
+        Either the processes do what they were supposed to do or they are all killed
+
+Assume we have some linked processes P1---P3---P10---P9----P4
+
+    One of the linked processes, say P9, dies
+    After all error signals accessing through the links have been processed 
+    All processes in the group P1,P3,P10,P9,P4 die
+
+When P9 dies, an error signal is sent to processes P4 and P10
+
+    P4 and P10 also die because they are not system processes
+    Error signals are sent to any processes they are linked to
+    Ultimately, the error signals propagate to all the linked processes
+
+
+Setting Up a Firewall
+---------------------
+
+Sometimes we don’t want all our linked process to die, and we want to stop
+the propagation of errors through the system
+
+     Assume we have some linked processes P1---P3---P10---P9----P4
+     We would like to stop the error signals to propagate
+
+To achieve this, assume that P3 has evaluated process_flag(trap_exit, true)
+
+     P3 becomes a system process
+     P3 can now trap exit signals
+     P1 and P3 did not die
+
+P3 functions as a firewall, stopping errors from propagating to other processes
+in the system.
+
+
+

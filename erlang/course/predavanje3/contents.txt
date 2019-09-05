@@ -1,0 +1,14 @@
+﻿
+Sequential programming
+
+lists_bifs.txt
+lists1.erl
+sets_bifs.txt
+sets1.erl
+sieve.erl
+hfuns.erl
+
+parse.erl
+encode.erl
+dict.erl
+dict1.erl
