@@ -68,6 +68,33 @@
    * Write a new record to the end of file
 
 
+### Triple-pattern access method
+
+* Triple-pattern access method (TP-AM) is a query node
+    - TP-AM is a leaf of a query tree
+    - A description is available at [https://big3store.github.io/big3store/](https://big3store.github.io/big3store/)
+* Architecture of TP-AM
+    - TP-AM is an Erlang process
+    - Triple-pattern obtained from the message {start ...}
+    - TP-AM creates ISAM index process if it does not exist
+    - TP-AM opens the access to the ISAM index by providing the access parameters (key+operation)
+    - The results of the query run at ISAM index process is obtained via messages from a PFS process
+        - Each message contains a data block that is parsed and processed by TP-AM
+    - After processing the triples (selection) they are collected in the stream blocks which are sent to the parent query node
+    - The protocol of TP-AM is based on
+        - the internal state active, db_access, eos, or inactive
+        - messages obtained from a PFS process (stored in input queue after receival)
+        - state of input and output queues
+* TP-AM interface
+    - TP-AM accepts synchronous messages
+        - {start, QNodeId, QueryId, SessionId, TriplePattern, ...} and 
+        - {eval, VarsValues}
+    - TP-AM accepts asynchronous messages
+        - {empty, From} and
+        - {stop, From}
+
+
+
 ## Draft material
 
 ### Interrelations
