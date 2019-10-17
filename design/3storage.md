@@ -72,6 +72,7 @@
 
 * Triple-pattern access method (TP-AM) is a query node
     - TP-AM is a leaf of a query tree
+    - TP-AM will be implemented as an update of tp_query_node.erl
     - A description is available at [https://big3store.github.io/big3store/](https://big3store.github.io/big3store/)
 * Architecture of TP-AM
     - TP-AM is an Erlang process
@@ -87,7 +88,7 @@
         - state of input and output queues
 * TP-AM interface
     - TP-AM accepts synchronous messages
-        - {start, QNodeId, QueryId, SessionId, TriplePattern, ...} and 
+        - {start, QNodeId, QueryId, SessionId, TriplePattern, ...} and
         - {eval, VarsValues}
     - TP-AM accepts asynchronous messages
         - {empty, From} and
