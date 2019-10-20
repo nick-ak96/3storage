@@ -1,0 +1,18 @@
+
+new()
+    Returns an empty set.
+add_element(X, S)
+    Adds an element X to the set S and returns a new set.
+del_element(X, S)
+    Deletes the element X from the set S and returns a new set.
+is_element(X, S)
+    Returns true if the element X is contained in the set S, otherwise false.
+is_empty(S)
+    Returns true if the set S is empty otherwise false.
+union(S1, S2)
+    Returns the union of the sets S1 and S2, i.e. the set of all elements which
+    are contained in either S1 or S2.
+intersection(S1, S2)
+    Returns the intersection of the sets S1 and S2, i.e. the set of all elements
+    which are contained in both S1 and S2.
+

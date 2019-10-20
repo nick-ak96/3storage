@@ -1,0 +1,253 @@
+Programming Robust Applications
+-------------------------------
+
+In previous lectures we have described the mechanisms available in Erlang 
+for handling errors
+
+How these mechanisms can be used to build robust and fault-tolerant systems
+
+Guarding Against Bad Data
+-------------------------
+
+Consider the server for analysing telephone numbers
+
+    File number_analyser.erl
+
+    server(AnalTable) ->
+        receive
+            {From, {analyse,Seq}} ->
+                Result = lookup(Seq, AnalTable),
+                From ! {number_analyser, Result},
+                server(AnalTable);
+            {From, {add_number, Seq, Dest}} ->
+                From ! {number_analyser, ack},
+                server(insert(Seq, Dest, AnalTable))
+        end.
+
+About guarding for errors in number_analywser.erl
+
+    Seq is a sequence of digits comprising a telephone number,
+
+    We could check that Seq was a list of items each of which is obtained by 
+    pressing a key on a tele-phone keypad.
+
+    Not doing such a check would result in a run-time failure if, for
+    example, Seq was the atom hello
+
+    An easier way to do the same thing is to evaluate lookup/2 and insert/3 
+    within the scope of a catch
+
+server(AnalTable) ->
+    receive
+        {From, {analyse,Seq}} ->
+            case catch lookup(Seq, AnalTable) of
+                {’EXIT’, _} ->
+                    From ! {number_analyser, error};
+                Result ->
+                    From ! {number_analyser, Result}
+             end,
+             server(AnalTable);
+        {From, {add_number, Seq, Key}} ->
+             From ! {number_analyser, ack},
+             case catch insert(Seq, Key, AnalTable) of
+                 {’EXIT’, _} ->
+                     From ! {number_analyser, error},
+                     server(AnalTable); % Table not changed
+                 NewTable ->
+                     server(NewTable)
+             end
+    end.
+
+A server should be designed so that it cannot be ‘crashed’ by sending it bad data
+
+    Using catch it is easy to write the number analysis function for the normal case
+
+    Let Erlang’s error handling mechanisms deal with errors such as badmatch, 
+    badarg and function_clause
+
+In many cases the data sent to a server comes from the access functions to the server
+
+    The process identity of the client process From which is sent to the number analysis 
+    server comes from the access function
+
+    lookup(Seq) ->
+        number_analyser ! {self(), {analyse,Seq}},
+        receive
+            {number_analyser, Result} ->
+                Result
+        end.
+
+    The server need not check that From is a process identity
+
+        We are guarding against inadvertent programming errors
+
+A malicious program could bypass the access routines and crash the server by sending
+
+    number_analyser ! {55, [1,2,3]}
+
+    Number analyser trying to send a message to 55 and subsequently crashing
+
+
+Robust Server Processes
+-----------------------
+
+One of previous examples was a resource allocator
+
+A resource has been allocated to a process 
+
+    It will not be returned to the allocator if the process making the allocation 
+    terminates (erroneously or normally) without freeing the resource
+
+This can be circumvented by
+
+    Setting the server to trap EXIT signals (process_flag(trap_exit, true)).
+    
+    Creating links between the allocator and processes which have allocated one
+    or more resources.
+
+    Handling EXIT signals from such processes.
+
+The changes in allocator.erl
+
+    The access routines to the allocator are left unchanged. 
+
+    Starting the modified allocator is done as follows:
+
+    start_server(Resources) ->
+        process_flag(trap_exit, true),
+        server(Resources, []).
+
+    The ‘server’ loop is modified to receive EXIT signals
+  
+    server(Free, Allocated) ->
+        receive
+            {From,alloc} ->
+                allocate(Free, Allocated, From);
+            {From,{free,R}} ->
+                free(Free, Allocated, From, R);
+            {’EXIT’, From, _ } ->
+                check(Free, Allocated, From)
+        end.
+
+    allocate/3 is modified so that we create a link to the process doing the allocation 
+    (if a resource is available)
+
+    allocate([R|Free], Allocated, From) ->
+        link(From),
+        From ! {resource_alloc,{yes,R}},
+        server(Free, [{R,From}|Allocated]);
+
+    allocate([], Allocated, From) ->
+        From ! {resource_alloc,no},
+        server([], Allocated).
+
+    free/4 becomes more complicated:
+
+    free(Free, Allocated, From, R) ->
+        case lists:member({R, From}, Allocated) of
+            true ->
+                From ! {resource_alloc, yes},
+                Allocated1 = lists:delete({R, From}, Allocated),
+                case lists:keysearch(From, 2, Allocated1) of
+                    false ->
+                        unlink(From);
+                    _ ->
+                        true
+                end,
+                server([R|Free], Allocated1);
+            false ->
+                From ! {resource_alloc, error},
+                server(Free, Allocated)
+    end.
+
+    Comments:
+    
+        First we check that the resource being freed really is allocated to the process
+        which is freeing it
+
+        We cannot simply unlink From, but must first check that From has not allocated 
+        other resources
+
+    If a process to which we have created a link terminates, the server will receive
+    an EXIT signal and we call check(Free, Allocated, From)
+ 
+    check(Free, Allocated, From) ->
+        case lists:keysearch(From, 2, Allocated) of
+            false ->
+                server(Free, Allocated);
+            {value, {R, From}} ->
+                check([R|Free], lists:delete({R, From}, Allocated), From)
+        end.
+
+    Freeing an unallocated resource is probably a serious error
+
+        We could change free/1 to kill the process doing the erroneous freeing
+
+    free(Resource) ->
+        resource_alloc ! {self(),{free,Resource}},
+        receive
+            {resource_alloc, error} ->
+                exit(bad_allocation); % exit added here
+            {resource_alloc, Reply} ->
+                Reply
+        end.
+  
+    Process which is killed in this way will, if it has allocated resources, be linked
+    to the server. 
+
+        The server will thus receive an EXIT signal which will be handled as
+        above and the allocated resources will be freed
+
+The above illustrates the following points
+
+    The interface to a server can be designed in such a way that clients use access
+    functions (in this case allocate/0 and free/1) and have no idea of what
+    goes on ‘behind the scenes’. 
+
+    The communication between clients and the server process is hidden from the user. 
+
+        In particular, clients need not know the process identity of the server and 
+        thus cannot interfere with its execution.
+
+    A server which traps EXIT signals and creates links to its clients can monitor
+    clients and take appropriate actions if the clients die.
+
+
+Isolating Computations
+----------------------
+
+In some applications we may wish to isolate a computation completely so that it
+cannot influence other processes
+
+    The Erlang shell is such a case
+
+An expression evaluated in this shell can influence the process performing the evaluation 
+in a number of ways
+
+    It can send the identity of the process running the shell (self/0) to other processes 
+
+        Others can subsequently create links to this process or send it messages
+
+        It can register or unregister this process    
+
+The code is stored in *c_shell.erl*
+
+The process running the shell traps EXIT signals
+
+Commands are evaluated in a separate process 
+
+    (spawn_link(c_shell, eval, [self(), Exprs]))
+
+    This is linked to the shell process. 
+
+    Despite the fact that we give c_shell:eval/2 the process identity of the shell, 
+
+        this cannot be misused since 
+
+        it is not given as an argument to the function doing the actual evaluation, 
+        
+            erl_eval:exprs/2
+
+
+
+

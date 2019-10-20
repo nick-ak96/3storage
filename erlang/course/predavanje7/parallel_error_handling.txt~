@@ -1,0 +1,583 @@
+Errors in Concurrent Programs
+-----------------------------
+
+Extending the ideas to concurrent programs
+
+A system with only one sequential process
+
+    If this process dies no other process can help
+    For this reason, sequential languages have concentrated on the prevention of failure 
+
+        Emphasis on defensive programming
+
+In Erlang we have a large number of processes at our disposal
+
+    The failure of any individual process is not so important
+    We usually write only a small amount of defensive code 
+    Instead concentrate on writing corrective code
+    Detect the errors and then correct them after they have occurred
+    
+Error Handling Philosophy
+
+    Based on the idea of remote detection and handling of errors
+    Instead of handling an error in the process where the error occurs
+    We let the process die and correct the error in some other process
+
+When we design a fault-tolerant system, we assume that errors will occur
+
+    Processes will crash, and that machines will fail
+    Our job is to detect the errors after they have occurred and correct them if possible
+    Users should not notice any failures or suffer any loss of service
+    we have code to clean up the system after errors have occurred
+
+Detecting and identifying errors is built into the Erlang VM 
+
+    Integrated at a very low level and is part of the Erlang programming language
+
+        how to detect errors, 
+        how to identify what has gone wrong, and 
+        how to keep the system in a stable state
+
+Philosophy can be summed up in two easy-to-remember phrases
+
+    "Let some other process fix the error"
+    "Let it chrash!"
+
+
+Let Some Other Process Fix the Error
+------------------------------------
+
+Processes are arranged to monitor each other for health
+
+    If a process dies, other process can observe this and perform actions
+    
+We must create a *link* or monitor between the processes
+
+    If the linked or monitored processes dies, the observing process is informed
+    Process running on one machine monitor the behavior of a process running 
+        on a different machine
+
+        This is the basis for programming fault-tolerant systems
+        Entire machine might crash, so we need at least two machines
+        One machine performs computations, and the other machines observe
+
+    This can be thought of as an extension to handling errors in sequential code
+
+  
+Let It Crash
+------------
+
+This will sound very strange to you if you come from a language like C
+
+    We are taught to write defensive code
+    This leads to large quantities of error checking code 
+ 
+        which is *intertwined* with the non-error-checking code
+
+In Erlang we do exactly the opposite. We build our applications in two parts:
+
+    A part that solves the problem and a part that corrects errors if they have occurred
+    The part that solves the problem is written with as little defensive code as possible
+ 
+        We assume that all arguments to functions are correct
+ 
+    The part that corrects errors is often *generic*
+
+        The same error-correcting code can be used for many different applications
+
+Analogical performance of DBMS and OS 
+
+    In database, for instance, aborted transactions let the system restore the database 
+        to the state it was in before the error occurred
+    In an operating system, if a process crashes, we let the operating system close any 
+        open files or sockets and restore the system to a stable state
+
+This leads to a clean separation of issues
+
+    Code that solves the problem and the observing and error correcting code
+    The two are not intertwined
+    This can lead to a dramatic reduction in code volume
+
+
+Run-time Failure
+----------------
+
+As mentioned above, a run-time failure will cause a process to terminate abnormally
+if the failure is not within the scope of a catch. 
+
+When a process terminates abnormally it sends EXIT signals to all the processes 
+to which it is linked. These signals contain an atom which gives the reason for 
+the failure. 
+
+The most common reasons are:
+
+badmatch
+
+    A match has failed. For example, a process matching 1 = 3 terminates and
+    the EXIT signal {’EXIT’, From, badmatch} is sent to its linked processes.
+    
+badarg
+  
+    A BIF has been called with an argument of an incorrect type. For example,
+    calling atom_to_list(123) causes the process evaluating the BIF to termi-
+    nate and the EXIT signal {’EXIT’, From, badarg} to be sent to its linked
+    processes. 123 is not an atom.
+
+case_clause
+
+    No branch of a case expression matches. For example, a process evaluating:
+
+    M = 3,
+    case M of
+       1 ->  
+           yes;
+       2 ->
+           no
+    end.
+
+    terminates and the EXIT signal {’EXIT’, From, case_clause} is sent to its 
+    linked processes.
+
+if_clause
+
+    No branch of an if expression has matched. For example, a process evaluating:
+
+    M = 3,
+    if
+        M == 1 ->
+            yes;
+        M == 2 ->
+            no
+    end.
+
+    terminates and the EXIT signal {’EXIT’, From, if_clause} is sent to its
+    linked processes.
+
+function_clause
+
+    None of the heads of a function matches the arguments with which a function
+    is called. For example, a process evaluating foo(3) when foo/1 has been
+    defined as:
+
+    foo(1) ->
+        yes;
+    foo(2) ->
+        no.
+
+    terminates and {’EXIT’, From, function_clause} is sent to its linked pro-
+    cesses.
+
+undef
+
+    A process which tries to evaluate a function which does not exist terminates
+    and {’EXIT’, From, undef} is sent to its linked processes (see Section ??).
+
+badarith
+
+    A process which evaluates a bad arithmetical expression (for example, a
+    process evaluating 1 + foo) terminates and {’EXIT’, Pid, badarith} is
+    sent to its linked processes.
+
+
+Error Handling Semantics
+------------------------
+
+Some new terms that you’ll come across later in the chapter
+
+Processes
+
+    There are two types of processes: normal processes and system processes.
+    
+        spawn() creates a normal process. 
+
+    A normal process can become a system process by evaluating the BIF 
+    process_flag(trap_exit, true).
+
+Links
+
+    Processes can be linked. If the two processes A and B are linked and A
+    terminates for any reason, an error signal will be sent to B and the other
+    way around.
+
+Link sets
+
+    The link set of a process P is the set of processes that are linked to P.
+
+Monitors
+
+    Monitors are similar to links but are one-directional. If A monitors B and
+    if B terminates for any reason, a “down” message will be sent to A but not
+    the other way around.
+
+Messages and error signals
+
+    Processes collaborate by exchanging messages or error signals. 
+    
+        Messages are sent using the send primitive. 
+        Error signals are sent automatically when a process crashes or when 
+            a process terminates. 
+        The error signals are sent to the link set of the process that terminated.
+
+Receipt of an error signal
+
+    When a system process receives an error signal, the signal is converted into 
+        a message of the form {'EXIT', Pid, Why}. 
+        
+        Pid is the identity of the process that terminated, and 
+        Why is the reason for termination (sometimes called the exit reason). 
+   
+    If the process terminates without an error, then 
+
+        Why will be the atom normal; 
+        otherwise, Why describes the error.
+
+    When a normal process receives an error signal, 
+
+         it will terminate if the exit reason is not normal. 
+         When it terminates, it also broadcasts an exit signal to its link set.
+
+Explicit error signals
+
+    A process that evaluates exit(Why) will terminate 
+
+        (if this code is not executing within the scope of a catch or try primitive) and 
+        broadcast an exit signal with the reason Why to its link set.
+
+    A process can send a “fake” error signal by evaluating exit(Pid, Why). 
+
+        In this case, Pid will receive an exit signal with the reason Why. 
+        The process that called exit/2 does not die (this is deliberate).
+
+Untrappable exit signals
+
+    When a system process receives a kill signal, it terminates. 
+ 
+        Kill signals are generated by calling exit(Pid, kill). 
+
+    This signal bypasses the normal error signal processing mechanism and is not 
+    converted into a message. 
+
+    The exit kill signal should be reserved for rogue processes that refuse to die
+    using any of the other error handling mechanisms.
+
+
+Creating Links
+--------------
+
+Imagine we have a set of unrelated processes P1-P10
+
+    To create links, we call the primitive link(Pid)
+
+        link(Pid) creates a link between the calling process and Pid
+        if P1 calls link(P3), a link is created between P1 and P3
+
+    After P1 calls link(P3), P3 calls link(P10), and so on
+
+        Finally we get P1---P3---P10---P9----P4 linked
+        Note that the link set of P1 has one element (P3) 
+        The link set of P3 has two elements (P1 and P10), and so on
+
+Example
+
+normal.erl - A chain of linked processes. 
+
+
+Groups of Processes That All Die Together
+-----------------------------------------
+
+Often you’ll want to create groups of processes that all die together. 
+
+    When processes collaborate to solve a problem and something goes wrong 
+
+        We can sometimes recover, but if we can’t recover
+        we just want to stop everything we were doing 
+
+    This is rather like the notion of a transaction
+
+        Either the processes do what they were supposed to do or they are all killed
+
+Assume we have some linked processes P1---P3---P10---P9----P4
+
+    One of the linked processes, say P9, dies
+    After all error signals accessing through the links have been processed 
+    All processes in the group P1,P3,P10,P9,P4 die
+
+When P9 dies, an error signal is sent to processes P4 and P10
+
+    P4 and P10 also die because they are not system processes
+    Error signals are sent to any processes they are linked to
+    Ultimately, the error signals propagate to all the linked processes
+
+Example
+
+link_demo.erl - Changing the default signal reception action
+
+
+Setting Up a Firewall
+---------------------
+
+Sometimes we don’t want all our linked process to die, and we want to stop
+the propagation of errors through the system
+
+     Assume we have some linked processes P1---P3---P10---P9----P4
+     We would like to stop the error signals to propagate
+
+To achieve this, assume that P3 has evaluated process_flag(trap_exit, true)
+
+     P3 becomes a system process
+     P3 can now trap exit signals
+     P1 and P3 did not die
+
+P3 functions as a firewall, stopping errors from propagating to other processes
+in the system.
+
+
+Monitors
+--------
+
+Monitors are similar to links but withwith several significant differences.
+
+Monitors are unidirectional. 
+
+    If A monitors B and B dies, then A will be sent an exit message but not 
+    the other way around 
+
+    When a monitored process dies, a “down” message and not an exit signal
+    is sent to the monitoring process. 
+
+        This means that the monitoring process does not have to become 
+        a system process in order to handle errors.
+
+Monitors are used when you want asymmetry in error handling; 
+
+links are used when you want symmetric error handling. 
+
+Monitors are typically used by servers to monitor the behavior of clients.
+
+
+Error Handling Primitives
+-------------------------
+
+The primitives for manipulating links and monitors and for trapping and
+sending exit signals are as follows
+
+-spec spawn_link(Fun) -> Pid
+-spec spawn_link(Mod, Fnc, Args) -> Pid
+
+    This behaves like spawn(Fun) or spawn(Mod,Func,Args) and also creates a link
+    between the parent and child processes.
+
+-spec spawn_monitor(Fun) -> {Pid, Ref}
+-spec spawn_monitor(Mod, Func, Args) -> {Pid, Ref}
+
+    This is like spawn_link, but it creates a monitor rather than a link. Pid is the
+    process identifier of the newly created process, and Ref is a reference to
+    the process. If the process dies with the reason Why, then the message
+    {'DOWN',Ref,process,Pid,Why} will be sent to the parent process.
+
+-spec process_flag(trap_exit, true)
+
+    This turns the current process into a system process. A system process
+    is a process that can receive and process error signals.
+
+-spec link(Pid) -> true
+
+    This creates a link to the process Pid. Links are symmetric. If a process A
+    evaluates link(B), then it will be linked to B. The net effect is the same as
+    if B had evaluated link(A).
+    If the process Pid does not exist, then an exit noproc exception is raised.
+    If A is already linked to B and evaluates link(B) (or vice versa), the call is
+    ignored.
+
+-spec unlink(Pid) -> true
+
+    This removes any link between the current process and the process Pid.
+
+-spec erlang:monitor(process, Item) -> Ref
+
+    This sets up a monitor. Item is a Pid or a registered name of a process.
+
+-spec demonitor(Ref) -> true
+
+    This removes a monitor with reference Ref.
+
+-spec exit(Why) -> none()
+
+    This causes the current process to terminate with the reason Why. If the
+    clause that executes this statement is not within the scope of a catch
+    statement, then the current process will broadcast an exit signal, with
+    argument Why to all processes to which it is currently linked. It will also
+    broadcast a DOWN message to all processes that are monitoring it.
+
+-spec exit(Pid, Why) -> true
+
+    This sends an exit signal with the reason Why to the process Pid. The process 
+    executing this BIF does not itself die. This can be used to “fake” exit
+    signals.
+
+We can use these primitives to set up networks of processes that monitor
+each other, which then provide a basis for building fault-tolerant software.
+
+
+Programming for Fault Tolerance
+-------------------------------
+
+Few simple techniques that can be used to make fault-tolerant code
+
+
+Performing an Action When a Process Dies
+----------------------------------------
+
+Use lib_misc.erl !
+
+on_exit(Pid, Fun) ->
+    spawn(fun() ->
+              Ref = monitor(process, Pid),
+              receive
+                  {'DOWN', Ref, process, Pid, Why} ->
+                      Fun(Why)
+              end
+          end.
+
+Description:
+
+    monitor(process, Pid) creates a monitor to Pid. 
+    When the process dies, a DOWN message is received and 
+    calls Fun(Why).
+
+To test this, we’ll define a function F that waits for a single message X and
+then computes list_to_atom(X).
+
+1> F = fun() ->
+           receive
+               X -> list_to_atom(X)
+           end
+       end.
+#Fun<erl_eval.20.69967518>
+
+We’ll spawn this:
+
+2> Pid = spawn(F).
+<0.61.0>
+
+And we’ll set up an on_exit handler to monitor it.
+
+3> lib_misc:on_exit(Pid,
+                    fun(Why) ->
+                        io:format(" ~p died with:~p~n",[Pid, Why])
+                    end).
+<0.63.0>
+
+If we send an atom to Pid, the process will die 
+
+    Because it tries to evaluate list_to_atom of a nonlist), and 
+    on_exit handler will be called.
+
+4> Pid ! hello.
+ <0.36.0> died with:{badarg,[{erlang,list_to_atom,[hello],[]}]}
+hello
+5> 
+=ERROR REPORT==== 24-Apr-2017::12:00:03 ===
+Error in process <0.36.0> with exit value: {badarg,[{erlang,list_to_atom,[hello],[]}]}
+
+The function that is invoked when the process dies can perform 
+any computation it likes: 
+
+    it can ignore the error, 
+    log the error, or 
+    restart the application. 
+
+The choice is up to the programmer.
+
+
+Making a Set of Processes That All Die Together
+-----------------------------------------------
+
+Suppose we want to create several worker processes that are used to solve some problem. 
+
+    They evaluate the functions F1, F2, and so on. 
+    If any process dies, we want them all to die. 
+    We can do this by calling start([F1,F2, ...]).
+
+start(Fs) ->
+    spawn(fun() ->
+              [spawn_link(F) || F <- Fs],
+              receive
+                  after
+                      infinity -> true
+              end
+          end).
+
+start(Fs) spawns a process, which spawns and links the worker processes and
+then waits for an infinite time. 
+
+    If any worker process dies, they all die.
+
+If we want to know whether the processes have all died, we can add an on_exit
+handler to the start process.
+
+Pid = start([F1, F2, ...]),
+      on_exit(Pid, fun(Why) ->
+                       ... the code here runs if any worker
+                       ... process dies
+                   end)
+
+
+Making a Process That Never Dies
+--------------------------------
+
+We’ll make a keep-alive process. 
+
+    The idea is to make a registered process that is always alive
+    if it dies for any reason, it will be immediately restarted.
+
+We can use on_exit to program this.
+
+Use lib_misc.erl !
+
+keep_alive(Name, Fun) ->
+    register(Name, Pid = spawn(Fun)),
+    on_exit(Pid, fun(_Why) -> keep_alive(Name, Fun) end).
+
+This makes a registered process called Name that evaluates spawn(Fun). 
+
+    If the process dies for any reason, then it is restarted.
+    
+There is a rather subtle error in on_exit and keep_alive. 
+
+    If we stare hard at the following two lines of code:
+
+    Pid = register(...),
+    on_exit(Pid, fun(X) -> ..),
+
+    There is a possibility that the process dies in the gap between these 
+    two statements. 
+
+         If the process dies before on_exit gets evaluated, 
+         then a link will be not be created, and 
+         the on_exit process will not work as you expected. 
+
+    This could happen if two programs try to evaluate keep_alive at the
+    same time and with the same value of Name. 
+
+    This is called a *race condition*
+
+When you combine the Erlang primitives spawn, spawn_monitor, register
+
+    Think carefully about possible race conditions and write your code 
+    in such a way that race conditions cannot happen
+
+Some ideas to contemplate
+
+     Errors that cannot be trapped in sequential code flow out of the processes 
+     where they occurred
+
+     Furthermore, errors follow the links to other processes that can be programmed 
+     to take care of the errors. 
+
+     All the mechanisms we have described (the linking process and so on)
+     work transparently across machine boundaries.
+
+     Crossing machine boundaries leads us to distributed programming. 
+
+

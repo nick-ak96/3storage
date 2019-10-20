@@ -1,0 +1,17 @@
+tuple_to_list(T)
+    Converts the tuple T to a list.
+    Example: tuple_to_list({1,2,3,4}) =⇒ [1,2,3,4].
+list_to_tuple(L)
+    Converts the list L to a tuple.
+    Example: list_to_tuple([a,b,c]) =⇒ {a,b,c}.
+element(N, T)
+    Returns the Nth element of the tuple T.
+    Example: element(3,{a,b,c,d}) =⇒ c.
+setelement(N, T, Val)
+    Returns a new tuple which is a copy of of the tuple T where the Nth element
+    of the tuple has been replaced by Val.
+    Example: setelement(3, {a,b,c,d}, xx) =⇒ {a,b,xx,d}.
+size(T)
+    Returns the number of elements in the tuple T.
+    Example: size({a,b,c}) =⇒ 3.
+
