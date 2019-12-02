@@ -1,30 +1,23 @@
-%% --------------------------------------------------------------------
-%% Header
-%% --------------------------------------------------------------------
+% HEADER =============================================================
+%
+%
 -module(pfs).
 -behaviour(gen_server).
 
 
-% includes
-%-include_lib("kernel/include/logger.hrl").
-
-
 % gen_server API
--export([ init/1, terminate/2, handle_call/3, handle_cast/2 ]).
-% public API
--export([ start_link/2, stop/1, read_request/2, write_request/2 ]).
+-export([ init/1, start_link/2, start_link/3, terminate/2, handle_call/3, handle_cast/2 ]).
 
 
 % Constants
 -define(PAGE_SIZE, 4). % page size in bytes
--define(N_CHUNKS, 1). % number of chunks/pages that can be processed at once
 
 
 % Structures
-% sn = ServerName, f = PageFile, rq = RequestQueue
--record(state, { sn, f, rq }).
+-record(state, { q }).
 
 %% TODO
+%% - check how the data is stored in the state of the gen_server. if copied -> optimize the write queries
 %% - add configuration
 %% - add logger
 %% --- write logs to a file, specify log level from configuration or as a start parameter
@@ -37,183 +30,168 @@
 %% - write tests
 %% - implement code_change interface
 %% - implement handle_info interface
-
-% ====================================================================
-
-
-%% --------------------------------------------------------------------
-%% Server API
-%% --------------------------------------------------------------------
+%
+%
+% END (HEADER) =======================================================
+%
+%
+% IMPLEMENTATION =====================================================
+%
+%
+% Server API ---------------------------------------------------------
 
 init([ ServerName, Filepath ]) ->
+	init([ ServerName, Filepath, notice ]);
+init([ ServerName, Filepath, LogLevel ]) ->
 	process_flag(trap_exit, true),
+	% initialize logger
+	logger:update_primary_config(maps:merge(logger:get_primary_config(), #{ level => LogLevel })),
+	% open page file
 	{ Status, Result } = file:open(Filepath, [raw, binary, read, write]),
+	logger:info("Initialization with file ~w", [ Filepath ]),
 	case Status of
 		error ->
-			%logger:error(Result),
-			%logger:critical("Initialization failed. Page file: ~w", [ File ]),
+			logger:error("Could not open page file. Error: ~p", [ Result ]),
+			logger:critical("Unexpected PFS termination"),
 			{ stop, Result };
 		ok ->
-			%logger:info("Initialization with file ~w", [ File ]),
-			%logger:info("Initialization finished successfully."),
-			{ ok, #state{ sn = ServerName, f = Result, rq = queue:new() } }
+			put(pfs_file, Result),
+			put(pfs_name, ServerName),
+			logger:info("Initialization finished successfully."),
+			{ ok, #state{ q = queue:new() } }
 	end.
-
-terminate(_Reason, _State) ->
-	% TODO termination protocol, if the request queue is non-empty
-	ok.
-
-handle_call({ read, { PageId, N } }, { _PID, Tag }, State) ->
-	process_request({ read, { PageId, N } }, Tag, State);
-handle_call({ write, { PageId, N, Data } }, { _PID, Tag }, State) ->
-	process_request({ write, { PageId, N, Data } }, Tag, State);
-handle_call({ continue, RequestId }, _From, State) ->
-	process_request({ continue, RequestId }, RequestId, State);
-handle_call({ read_request, { PageId, N } }, _From, State) ->
-	read_request(State#state.sn, { PageId, N });
-handle_call({ write_request, { PageId, N, Data } }, _From, State) ->
-	write_request(State#state.sn, { PageId, N, Data });
-handle_call(_Request, _From, State) ->
-	{ noreply, State }.
-
-handle_cast(_Request, State) ->
-	{ noreply, State }.
-
-% ====================================================================
-
-
-%% --------------------------------------------------------------------
-%% Public API
-%% --------------------------------------------------------------------
 
 start_link(ServerName, File) ->
-	gen_server:start_link({ local, ServerName }, ?MODULE, [ ServerName, File ], []).
+	start_link(ServerName, File, notice).
+start_link(ServerName, File, LogLevel) ->
+	gen_server:start_link({ local, ServerName }, ?MODULE, [ ServerName, File, LogLevel ], []).
 
-stop(ServerName) ->
-	gen_server:stop(ServerName).
+terminate(Reason, State) ->
+	logger:info("Terminating. Reason: ~p", [ Reason ]),
+	logger:debug("State before termination: ~p", [ State ]),
+	ok.
 
-read_request(ServerName, Request) ->
-	process_read_request(ServerName, { read, Request }).
+handle_call(_Request, _From, State) ->
+	logger:notice("Unhandled call request received"),
+	{ noreply, State }.
 
-write_request(ServerName, Request) ->
-	process_write_request(ServerName, { write, Request }).
+handle_cast({ read, _Receiver, _Payload } = Request, State) ->
+	{ noreply, handle_request(Request, State) };
+handle_cast({ write, _Receiver, _Payload } = Request, State) ->
+	{ noreply, handle_request(Request, State) };
+handle_cast({ append, _Receiver, _Payload } = Request, State) ->
+	{ noreply, handle_request(Request, State) };
+handle_cast(_Request, State) ->
+	logger:notice("Unhandled cast request received"),
+	{ noreply, State }.
 
-% ====================================================================
+% END (Server API) ---------------------------------------------------
+%
+%
+% Internal functions -------------------------------------------------
 
+handle_request(Request, State) ->
+	logger:debug("Received request: ~p", [ Request ]),
+	logger:debug("Current state: ~p", [ State ]),
+	% put the incoming request to the internal queue
+	IntQ = queue:in(Request, State#state.q),
+	logger:debug("Request is queued"),
+	% process requests from the internal queue
+	State#state { q = process_queue(IntQ) }.
 
-%% --------------------------------------------------------------------
-%% Internal functions
-%% --------------------------------------------------------------------
-
-process_read_request(ServerName, Request) ->
-	io:fwrite("process_read_request(~w, ~w)~n", [ ServerName, Request ]),
-	Reply = gen_server:call(ServerName, Request),
-	io:fwrite("reply: ~w~n", [ Reply ]),
-		case Reply of
-			{ continue, Data, Continue } ->
-				{ NewStatus, NewResult } = process_read_request(ServerName, Continue),
-				case NewStatus of
-					ok ->
-						{ ok, <<Data/binary, NewResult/binary>> };
-					error ->
-						{ error, NewResult }
-				end;
-			{ busy, Continue } ->
-				process_read_request(ServerName, Continue);
-			{ Status, Result } ->
-				{ Status, Result }
-		end.
-
-process_write_request(ServerName, Request) ->
-	io:fwrite("process_write_request(~w, ~w)~n", [ ServerName, Request ]),
-	Reply = gen_server:call(ServerName, Request),
-	io:fwrite("reply: ~w~n", [ Reply ]),
-	case Reply of
-		{ continue, Continue } ->
-			process_write_request(ServerName, Continue);
-		{ busy, Continue } ->
-			process_write_request(ServerName, Continue);
-		{ Status, Result } ->
-			{ Status, Result }
+process_queue(Q) ->
+	logger:debug("Processing internal queue"),
+	NewQ = process_internal_queue(Q),
+	% check mailbox
+	case process_info(self(), message_queue_len) of
+		{ message_queue_len, 0 } when NewQ =/= Q ->
+			logger:debug("No messages in the mailbox"),
+			% no messages -> continue to process the internal queue
+			process_queue(NewQ);
+		_ ->
+			logger:debug("No messages in the mailbox, idling"),
+			% there is a message -> exit
+			NewQ
 	end.
 
-process_request({ read, Args }, Tag, State) ->
-	process_response(Tag, read(Args, State));
-process_request({ write, Args }, Tag, State) ->
-	process_response(Tag, write(Args, State));
-process_request({ continue, Args }, Tag, State) ->
-	process_response(Tag, continue(Args, State)).
-
-process_response(_Tag, { Status, Result, NewState }) ->
-	{ reply, { Status, Result }, NewState };
-process_response(Tag, { continue, Result, NewRequest, NewState }) ->
-	{ reply, { continue, Result, { continue, Tag } }, NewState#state{ rq = queue:in({ Tag, NewRequest }, NewState#state.rq) } }.
-
-read({ PageId, N }, State) when N > ?N_CHUNKS ->
-	{ Status, Result } = read_page_file(State#state.f, PageId, ?N_CHUNKS),
-	case Status of
-		ok ->
-			{ continue, Result, { read, { PageId + ?N_CHUNKS, N - ?N_CHUNKS } }, State };
-		error ->
-			{ Status, Result, State }
-	end;
-read({ PageId, N }, State) ->
-	{ Status, Result } = read_page_file(State#state.f, PageId, N),
-	{ Status, Result, State }.
-
-write({ _PageId, N, Data }, State) when size(Data) =/= N * ?PAGE_SIZE ->
-	{ error, "Invalid data to process", State };
-write({ PageId, N, Data }, State) when N > ?N_CHUNKS ->
-	<<Chunk:(?N_CHUNKS * ?PAGE_SIZE)/binary, Rest/binary>> = Data,
-	{ Status, Result } = write_page_file(State#state.f, PageId, ?N_CHUNKS, Chunk),
-	case Status of
-		ok ->
-			{ continue, { write, { PageId + ?N_CHUNKS, N - ?N_CHUNKS, Rest } }, State };
-		error ->
-			{ Status, Result, State }
-	end;
-write({ PageId, N, Data }, State) ->
-	{ Status, Result } = write_page_file(State#state.f, PageId, N, Data),
-	{ Status, Result, State }.
-
-continue(Tag, State) ->
-	Q = queue:filter(fun(Item) -> { T, _ } = Item, Tag =:= T end, State#state.rq),
-	case queue:is_empty(Q) of
-		true ->
-			{ error, "No request was found to continue" };
-		false ->
-			QItem = queue:peek(State#state.rq),
-			case QItem of
-				{ value, { Tag, Request } } ->
-					continue_request(Request, State#state{ rq = queue:drop(State#state.rq)});
-				_ ->
-					{ busy, { continue, Tag }, State }
+process_internal_queue(Q) ->
+	case queue:out(Q) of
+		{ empty, _ } ->
+			logger:debug("Internal queue is empty"),
+			Q;
+		{ { value, { Fun, Receiver, Payload } = Request }, NewQ } ->
+			logger:debug("Processing the request: ~p", [ Request ]),
+			Result = process_request(Fun, Payload),
+			case Result of
+				{ done, Message } ->
+					logger:debug("Request resulted in: ~p", [ Message ]),
+					Receiver ! Message,
+					NewQ;
+				{ continue, Message, Continue } ->
+					logger:debug("Request is processed partially and resulted in: ~p", [ Message ]),
+					Receiver ! Message,
+					queue:in(Continue, NewQ)
 			end
 	end.
 
-continue_request({ read, Args }, State) ->
-	io:fwrite("continue_request(~w)~n", [ { read, Args } ]),
-	read(Args, State);
-continue_request({ write, Args }, State) ->
-	io:fwrite("continue_request(~w)~n", [ { write, Args } ]),
-	write(Args, State).
+process_request(read, { _PageId } = P) ->
+	read(P);
+process_request(write, { _PageId, _Data } = P) ->
+	write(P);
+process_request(append, { _Data } = P) ->
+	append(P);
+process_request(_Type, _P) ->
+	{ done, { error, "Unsupported request type" } }.
 
-read_page_file(File, PageId, N) ->
-	Result = file:pread(File, PageId * ?PAGE_SIZE, N * ?PAGE_SIZE),
+
+%% Page File Input/Output
+
+
+read({ PageId }) when is_integer(PageId) ->
+	File = get(pfs_file),
+	Result = file:pread(File, PageId * ?PAGE_SIZE, ?PAGE_SIZE),
 	case Result of
 		eof ->
-			{ error, "End of stream is reached" };
-		_ ->
-			Result
-	end.
+			{ done, { error, "End of stream is reached" } };
+		_ -> % either { error, Reason } or { ok, Data }
+			{ done, Result }
+	end;
+read(_P) ->
+	{ done, { error, "Invalid input" } }.
 
-write_page_file(File, PageId, _N, Data) ->
-	Result = file:pwrite(File, PageId * ?PAGE_SIZE, Data),
+write({ PageId, Data }) when is_binary(Data), is_integer(PageId), size(Data) =:= ?PAGE_SIZE ->
+	File = get(pfs_file),
+	Result = file:pwrite(File, PageId * ?PAGE_SIZE, prepare_write(Data)),
 	case Result of
 		ok ->
-			{ Result, ok };
-		_ ->
-			Result
-	end.
+			{ done, { ok, PageId } };
+		_ -> % { error, Reason }
+			{ done, Result }
+	end;
+write(_P) ->
+	{ done, { error, "Invalid input" } }.
 
-% ====================================================================
+append({ Data }) when is_binary(Data), size(Data) =:= ?PAGE_SIZE ->
+	File = get(pfs_file),
+	{ ok, Pos } = file:position(File, eof),
+	Result = file:pwrite(File, Pos, prepare_write(Data)),
+	case Result of
+		ok ->
+			{ ok, OffSet } = file:position(File, eof),
+			{ done, { ok, (OffSet - ?PAGE_SIZE) div ?PAGE_SIZE } };
+		_ -> % { error, Reason }
+			{ done, Result }
+	end;
+append(_P) ->
+	{ done, { error, "Invalid input" } }.
+
+prepare_write(Data) ->
+	% TODO add custom header that will contain the following properties
+	% - size of the actual data in the page
+	% - method to unpack the data into erlang term()
+	Data.
+
+% END (Internal functions) -------------------------------------------
+%
+%
+% END (IMPLEMENTATION) ===============================================
