@@ -47,6 +47,21 @@
              * All other request do not freeze if a large request is being processed
         * (to-do) Does it make sense to have sessions (with a given process `pid`)?
 
+    * PFS protocol
+
+        * Protocol has only two states: ```inactive``` and ```active```
+             * After function ```init()``` is called on the creation of gen_server, the state is ```inactive```
+             * Message ```start``` moves the state to ```active ```
+             * Read and write requests retain the state ```active```
+             * Message ```stop``` moves the state to ```inactive```
+        * Synchronization between i) reading the new masseges from a process queue and ii) executing the server requests
+             * After a request, or a data processing slot of a request is finished the process queue is inspected
+             * If there are no new messages the next request is processed
+             * The control is given to the ```gen_process``` loop if there are no more requests
+             * If there are new messages the process yields control to the system
+             * Erlang runtime system picks the next new message and calls the callback routine
+             * The callback routine first enters the request to the queue and then executes the next request
+
     * (expand) A cache is part of PFS
 
         * Page are read into buffer pool
@@ -54,27 +69,32 @@
 
 * Page file server interface
 
-    * { data_read, pgid, N } 
+    * Incomming messages
 
-        * Reads a sequence of N pages starting at the page pgid
-        * Read data pages are sent to the client process via data streams
+        * ```{ data_read, Pid, PidData, Pgid, N }```
+             * ```Pid``` is a pid of a client
+             * ```PidData``` is a pid of a process to receive data
+    	     * Reads a sequence of ```N``` pages starting at the page ```Pgid```
+             * Read data pages are sent to the client process ```Pid``` via data streams
+        * ```{ data_write, Pid, Pgid, N }```
+             * ```Pid``` is a pid of a client
+             * Writes a sequence of ```N``` pages to the db file starting at the page ```Pgid```
+             * Data pages to be written are received from a client process via data stream
+        * ```{ data_append, Pid, N }```
+             * ```Pid``` is a pid of a client
+             * Writes a sequence of ```N``` pages to the end of data file
+             * Data pages to be written are received from a client process via data stream
+        * ```{ data_page, Pid, Data }```
+             * ```Pid``` is a pid of a client 
+             * PFS receives one data page ```Data``` from a client ```Pid```
 
-    * { data_read_end } 
+    * Outgoing messages
 
-        * Signals the completition of data_read operation
-        * Number of pages sent to client is N
+        * ```Pid ! { data_page, Pgid, Data }```
+             * Server sends the contents ```Data``` of a data page ```Pgid``` to client ```Pid```
+             * The receiver is set by the parameter ```Pid``` of ```data_read``` message
+        * ```Pid ! { data_read_end, N }```
+             * Server signals to the client ```Pid``` the completition of data_read operation
+             * The data pages read have been sent to ```PidData```
+             * The number of pages sent to client is *N*
 
-    * { data_write, pgid, N }
-
-        * Writes a sequence of N pages to the db file
-        * Data pages to write are received from a client process via data streams
-
-    * { data_write_end }
-
-        * Signals the completition of data_write or data_append operation
-        * Number of pages received from client has to be equal N
-
-    * { data_append, N } }
-
-        * Writes a sequence of N pages to the end of data file
-        * Data pages to write are received from a client process via data streams
