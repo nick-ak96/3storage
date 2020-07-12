@@ -18,13 +18,13 @@
 
     * Binary file storage of pages
 
-        * N-th page is accessed by reading|writting from|to the position n*page-size in db file
+        * ```n```-th page is accessed by reading|writting from|to the position ```n*page-size``` in db file
         * Pages are stored in binaries (unused fragments at the end of block)
         * The question is whether the stream data pages are of the same size as file pages
-        * Read operation reads ```N``` pages from the given starting position in file
-        * Write operation writes ```N``` pages from the given starting position
-        * Append operation appends ```N``` pages to the end of data file
-        * Data is needed for read and write operation is transferred via data streams
+        * Read operation reads ```n``` pages from the given starting position in file
+        * Write operation writes ```n``` pages from the given starting position
+        * Append operation appends ```n``` pages to the end of data file
+        * Data needed for write operation is transferred via data streams
         * Read operation requires sending the completion message to client 
             * Clent and the data destination may be different
             * See description of the operation ```data_read```
@@ -32,7 +32,7 @@
     * PFS is linked to a client vie I/O data streams
 
         * Input/output data of write/read operations are obtained via data streams
-        * Data streams are composed of data messages that contain up to ```3PLES_PAGE``` triples (or less)
+        * Data streams are composed of data messages that contain up to ```3ples_page``` triples (or less)
         * Reading/writing data messages/triples from/to a stream
             * Processing unit is either a data message or a triple
             * Stream type is defined on initialization of a named queue
@@ -40,15 +40,16 @@
     * Requests are placed in a queue and served one by one
 
         * Pid of the client process is stored for each request
-        * Request to read N pages is completed after all the pages are read and sent to client
-        * Request to write N pages starts after complete data has been transferred 
-             * Data can be stored in a map that maps Pids to lists of collected data pages
+        * Request to read ```n``` pages is completed after all the pages are read and sent to client
+        * Request to write ```n``` pages starts after complete data has been transferred 
+             * Data can be stored in a map that maps pids to lists of collected data pages
+             * When number of collected pages are ```n``` then writing starts
         * Each request can process (read or write) a chunk of data 
              * A chunk of data is defined by the number of pages
-             * After a chunk is processed the state is stored in request and it is put back at the end of queue
+             * After a chunk is processed the state is stored in the request and the request is put back at the end of the queue
              * This implements a kind of round-robin algorithm
-             * All other request do not freeze if a large request is being processed
-        * (to-do) Does it make sense to have sessions (with a given process `pid`)?
+             * All other request do not freeze if a huge request is being processed
+        * (to-do) Does it make sense to have **sessions** (with a given process `pid`)?
 
     * PFS protocol
 
@@ -77,7 +78,7 @@
         * Page access is changed when reading pages in PFS
              * Each page access checks first the buffer
              * No need to read pages from disk
-             * All pages read are stored in the buffer
+             * All pages read from a disk are stored in the buffer
 
 * Page file server interface
 
@@ -88,7 +89,7 @@
 
     * Incoming messages
 
-        * ```{ data_read, Pid, PidData, Pgid, N }```
+        * ```{ data_read, Pid, Pgid, N, PidData }```
              * ```Pid``` is a pid of a client
              * ```PidData``` is a pid of a process to receive data
     	     * Reads a sequence of ```N``` pages starting at the page ```Pgid```
@@ -102,12 +103,14 @@
              * Writes a sequence of ```N``` pages to the end of data file
              * Data pages to be written are received from a client process via data stream
         * ```{ data_page, Pid, Data }```
+             * Messages ```data_page``` form are parts of a stream (```query_node.erl```)
              * ```Pid``` is a pid of a client 
              * PFS receives one data page ```Data``` from a client ```Pid```
 
     * Outgoing messages
 
         * ```Pid ! { data_page, Pgid, Data }```
+             * Messages ```data_page``` form are parts of a stream (```query_node.erl```)
              * Server sends the contents ```Data``` of a data page ```Pgid``` to client ```Pid```
              * The receiver is set by the parameter ```Pid``` of ```data_read``` message
         * ```Pid ! { data_read_end, N }```
